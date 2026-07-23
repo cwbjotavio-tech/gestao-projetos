@@ -138,11 +138,11 @@ def init_db():
                 tipo TEXT DEFAULT 'Torre',
                 finalidade TEXT DEFAULT 'Fabricação',
                 peso REAL DEFAULT 0.0,
-                site_1 TEXT,
-                site_2 TEXT,
-                num_serie TEXT,
-                local TEXT,
-                elemento TEXT,
+                site_1 TEXT DEFAULT '',
+                site_2 TEXT DEFAULT '',
+                num_serie TEXT DEFAULT '',
+                local TEXT DEFAULT '',
+                elemento TEXT DEFAULT '',
                 cliente TEXT,
                 responsavel TEXT,
                 data TEXT,
@@ -165,6 +165,12 @@ def init_db():
         
         # Migração dinâmica de colunas
         cols_novas = [
+            ("revisao", "TEXT DEFAULT '00'"),
+            ("site_1", "TEXT DEFAULT ''"),
+            ("site_2", "TEXT DEFAULT ''"),
+            ("num_serie", "TEXT DEFAULT ''"),
+            ("local", "TEXT DEFAULT ''"),
+            ("elemento", "TEXT DEFAULT ''"),
             ("observacoes", "TEXT DEFAULT ''"),
             ("estado_relogio", "TEXT DEFAULT 'parado'"),
             ("timestamp_ultimo_inicio", "TEXT DEFAULT ''"),
@@ -206,8 +212,6 @@ def formatar_segundos(segundos):
 
 def obter_tempo_decorrido_etapa(item, etapa_key):
     coluna = f'tempo_{etapa_key}_sec'
-    
-    # Prevenção contra KeyError caso a coluna não exista no registro
     if coluna not in item or pd.isna(item[coluna]):
         return 0
     
@@ -279,13 +283,16 @@ def excluir_torre(torre_id):
         conn.commit()
     st.cache_data.clear()
 
-def editar_torre(torre_id, acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, observacoes):
+def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, prazo, observacoes):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            UPDATE torres SET acionamento=?, projeto=?, cliente=?, tipo=?, finalidade=?, peso=?, responsavel=?, prazo=?, observacoes=?
+            UPDATE torres SET 
+                acionamento=?, projeto=?, revisao=?, tipo=?, finalidade=?, peso=?, 
+                site_1=?, site_2=?, num_serie=?, local=?, elemento=?, cliente=?, 
+                responsavel=?, prazo=?, observacoes=?
             WHERE id=?
-        ''', (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, observacoes, torre_id))
+        ''', (acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, prazo, observacoes, torre_id))
         conn.commit()
     st.cache_data.clear()
 
@@ -380,10 +387,16 @@ with col_b2:
         with st.form("form_nova_torre", clear_on_submit=True):
             f_acionamento = st.text_input("Acionamento *")
             f_projeto = st.text_input("Projeto *")
+            f_revisao = st.text_input("Revisão", value="00")
             f_cliente = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"])
             f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
             f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
             f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
+            f_site1 = st.text_input("Site I")
+            f_site2 = st.text_input("Site II")
+            f_num_serie = st.text_input("Nº Série")
+            f_local = st.text_input("Local")
+            f_elemento = st.text_input("Elemento")
             f_responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
             f_prazo = st.date_input("Prazo de Entrega", value=datetime.now() + timedelta(days=7))
             f_observacoes = st.text_area("Observações")
@@ -393,9 +406,9 @@ with col_b2:
                     with get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
-                            INSERT INTO torres (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, data, observacoes, status_projeto)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (f_acionamento, f_projeto, f_cliente, f_tipo, f_finalidade, f_peso, f_responsavel, f_prazo.strftime("%d/%m/%Y"), datetime.now().strftime("%d/%m/%Y"), f_observacoes))
+                            INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
+                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), datetime.now().strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
                     st.success("Torre cadastrada!")
@@ -410,16 +423,16 @@ aba_lista, aba_kanban, aba_dash, aba_cancelados, aba_usuarios = st.tabs([
     "👥 Usuários"
 ])
 
-# 1. LISTA COM CONTROLE DE TEMPO DETALHADO E AÇÕES
+# 1. LISTA COM CONTROLE DE TEMPO DETALHADO, COLUNAS RESTAURADAS E AÇÕES
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
     c1, c2, c3 = st.columns(3)
     with c1:
         busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar por projeto, acionamento...")
     with c2:
-        filtro_cliente = st.multiselect("Cliente", options=df_global["cliente"].unique() if not df_global.empty else [])
+        filtro_cliente = st.multiselect("Cliente", options=df_global["cliente"].dropna().unique() if not df_global.empty else [])
     with c3:
-        filtro_status = st.multiselect("Status", options=df_global["status_projeto"].unique() if not df_global.empty else [])
+        filtro_status = st.multiselect("Status", options=df_global["status_projeto"].dropna().unique() if not df_global.empty else [])
 
     df_view = df_global.copy()
     if busca_texto and not df_view.empty:
@@ -430,18 +443,104 @@ with aba_lista:
         df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
 
     if not df_view.empty:
+        # Montagem de todas as colunas correspondentes à imagem do usuário
+        df_view['ID'] = df_view['id']
+        df_view['Acionamento'] = df_view['acionamento']
+        df_view['Projeto'] = df_view['projeto']
+        df_view['Revisão'] = df_view['revisao'].fillna('00')
+        df_view['Tipo'] = df_view['tipo']
+        df_view['Finalidade'] = df_view['finalidade']
+        df_view['Peso (kg)'] = df_view['peso']
+        df_view['Site I'] = df_view['site_1'].fillna('')
+        df_view['Site II'] = df_view['site_2'].fillna('')
+        df_view['Nº. Série'] = df_view['num_serie'].fillna('')
+        df_view['Local'] = df_view['local'].fillna('')
+        df_view['Elemento'] = df_view['elemento'].fillna('')
+        df_view['Cliente'] = df_view['cliente']
+        df_view['Responsável'] = df_view['responsavel']
+        df_view['Data'] = df_view['data']
+        df_view['Prazo'] = df_view['prazo']
+        df_view['Etapa'] = df_view['status_projeto']
+        
+        # Cálculos de Progresso e Status
+        df_view['Progresso (%)'] = df_view['status_projeto'].map({
+            'Projeto': '25%', 'Steel': '50%', 'Sankhya': '75%', 'Concluído': '100%', 'Cancelado': '0%'
+        }).fillna('0%')
+        
+        df_view['Status Geral'] = df_view['estado_relogio'].map({
+            'rodando': '🟢 Em Execução', 'parado': '🔴 Pausado'
+        }).fillna('🔴 Pausado')
+        
+        df_view['Data de Cadastro'] = df_view['inicio_projeto'].apply(lambda x: x if x else '-')
+        df_view['Fim Projeto'] = df_view['fim_projeto'].apply(lambda x: x if x else '-')
+        df_view['Fim Steel'] = df_view['fim_steel'].apply(lambda x: x if x else '-')
+        df_view['Fim Sankhya'] = df_view['fim_sankhya'].apply(lambda x: x if x else '-')
+        
         df_view['Tempo Projeto'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'projeto')), axis=1)
         df_view['Tempo Steel'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'steel')), axis=1)
         df_view['Tempo Sankhya'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'sankhya')), axis=1)
 
+        df_view['Status Projeto'] = df_view.apply(lambda r: 'Concluído' if r['fim_projeto'] else ('Em Andamento' if r['status_projeto'] == 'Projeto' else 'Pendente'), axis=1)
+        df_view['Status Steel'] = df_view.apply(lambda r: 'Concluído' if r['fim_steel'] else ('Em Andamento' if r['status_projeto'] == 'Steel' else 'Pendente'), axis=1)
+        df_view['Status Sankhya'] = df_view.apply(lambda r: 'Concluído' if r['fim_sankhya'] else ('Em Andamento' if r['status_projeto'] == 'Sankhya' else 'Pendente'), axis=1)
+
         cols_display = [
-            'id', 'acionamento', 'projeto', 'cliente', 'status_projeto', 'prazo', 
-            'inicio_projeto', 'fim_projeto', 'Tempo Projeto',
-            'inicio_steel', 'fim_steel', 'Tempo Steel',
-            'inicio_sankhya', 'fim_sankhya', 'Tempo Sankhya', 'observacoes'
+            'ID', 'Acionamento', 'Projeto', 'Revisão', 'Tipo', 'Finalidade', 'Peso (kg)',
+            'Site I', 'Site II', 'Nº. Série', 'Local', 'Elemento', 'Cliente', 'Responsável',
+            'Data', 'Prazo', 'Etapa', 'Progresso (%)', 'Status Geral', 'Data de Cadastro',
+            'Fim Projeto', 'Fim Steel', 'Fim Sankhya', 'Tempo Projeto', 'Tempo Steel',
+            'Tempo Sankhya', 'Status Projeto', 'Status Steel', 'Status Sankhya'
         ]
-        st.dataframe(df_view[cols_display], use_container_width=True, hide_index=True)
         
+        st.dataframe(df_view[cols_display], use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # PAINEL DE AÇÕES (EDITAR / EXCLUIR NA LISTAGEM)
+        st.subheader("⚡ Ações na Listagem (Editar / Excluir Registros)")
+        col_sel, col_act1, col_act2 = st.columns([3, 1, 1])
+
+        opcoes_torres = {f"#{row['id']} - {row['projeto']} ({row['cliente']})": row['id'] for _, row in df_view.iterrows()}
+        
+        with col_sel:
+            torre_selecionada_label = st.selectbox("Selecione um projeto para modificar:", list(opcoes_torres.keys()))
+            id_selecionado = opcoes_torres[torre_selecionada_label]
+            item_sel = df_view[df_view['id'] == id_selecionado].iloc[0]
+
+        with col_act1:
+            with st.popover("✏️ Editar Projeto", use_container_width=True):
+                st.write(f"**Editando ID #{id_selecionado}**")
+                with st.form(key=f"form_edit_list_{id_selecionado}"):
+                    e_ac = st.text_input("Acionamento", value=str(item_sel['acionamento']))
+                    e_proj = st.text_input("Projeto", value=str(item_sel['projeto']))
+                    e_rev = st.text_input("Revisão", value=str(item_sel['revisao'] or '00'))
+                    e_cli = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"], index=0)
+                    e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+                    e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                    e_peso = st.number_input("Peso (kg)", value=float(item_sel['peso']))
+                    e_s1 = st.text_input("Site I", value=str(item_sel['site_1'] or ''))
+                    e_s2 = st.text_input("Site II", value=str(item_sel['site_2'] or ''))
+                    e_ns = st.text_input("Nº Série", value=str(item_sel['num_serie'] or ''))
+                    e_loc = st.text_input("Local", value=str(item_sel['local'] or ''))
+                    e_elem = st.text_input("Elemento", value=str(item_sel['elemento'] or ''))
+                    e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
+                    e_prazo = st.text_input("Prazo", value=str(item_sel['prazo']))
+                    e_obs = st.text_area("Observações", value=str(item_sel['observacoes'] or ''))
+                    
+                    if st.form_submit_button("Salvar Alterações"):
+                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc, e_elem, e_cli, e_resp, e_prazo, e_obs)
+                        st.success("Projeto atualizado com sucesso!")
+                        st.rerun()
+
+        with col_act2:
+            with st.popover("🗑️ Excluir Projeto", use_container_width=True):
+                st.warning(f"Excluir definitivamente o projeto #{id_selecionado}?")
+                if st.button("Sim, Excluir", key=f"del_list_{id_selecionado}"):
+                    excluir_torre(id_selecionado)
+                    st.success("Projeto excluído!")
+                    st.rerun()
+
+        st.write("<br>", unsafe_allow_html=True)
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_view[cols_display].to_excel(writer, index=False, sheet_name='Torres')
@@ -478,7 +577,6 @@ with aba_kanban:
                     st.markdown(f"**#{id_item} - {item['projeto']}**")
                     st.caption(f"**Cliente:** {item['cliente']} | **Prazo:** {item['prazo']}")
                     
-                    # Calcula o tempo apenas se for uma etapa técnica com cronômetro
                     segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key) if etapa_key in ['projeto', 'steel', 'sankhya'] else 0
                     tempo_str = formatar_segundos(segundos_etapa)
                     
@@ -522,15 +620,21 @@ with aba_kanban:
                                 with st.form(key=f"edit_form_{id_item}"):
                                     e_ac = st.text_input("Acionamento", value=item['acionamento'])
                                     e_proj = st.text_input("Projeto", value=item['projeto'])
+                                    e_rev = st.text_input("Revisão", value=item['revisao'] or '00')
                                     e_cli = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"], index=0)
                                     e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
                                     e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
                                     e_peso = st.number_input("Peso (kg)", value=float(item['peso']))
+                                    e_s1 = st.text_input("Site I", value=item['site_1'] or '')
+                                    e_s2 = st.text_input("Site II", value=item['site_2'] or '')
+                                    e_ns = st.text_input("Nº Série", value=item['num_serie'] or '')
+                                    e_loc = st.text_input("Local", value=item['local'] or '')
+                                    e_elem = st.text_input("Elemento", value=item['elemento'] or '')
                                     e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
                                     e_prazo = st.text_input("Prazo", value=item['prazo'])
                                     e_obs = st.text_area("Observações", value=item['observacoes'] or "")
                                     if st.form_submit_button("Salvar"):
-                                        editar_torre(id_item, e_ac, e_proj, e_cli, e_tipo, e_fin, e_peso, e_resp, e_prazo, e_obs)
+                                        editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc, e_elem, e_cli, e_resp, e_prazo, e_obs)
                                         st.rerun()
 
                         with c_ed2:
@@ -554,7 +658,6 @@ with aba_dash:
     st.subheader("📈 Dashboard de Desempenho e Indicadores")
     
     if not df_global.empty:
-        # FILTROS EXCLUSIVOS DO DASHBOARD
         with st.expander("🔍 Filtros do Dashboard", expanded=True):
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
@@ -564,7 +667,6 @@ with aba_dash:
             with col_f3:
                 dash_tipos = st.multiselect("Filtrar por Tipo:", options=df_global['tipo'].dropna().unique(), key="dash_tipo")
 
-        # Aplicação dos Filtros
         df_dash = df_global.copy()
         if dash_clientes:
             df_dash = df_dash[df_dash['cliente'].isin(dash_clientes)]
@@ -574,7 +676,6 @@ with aba_dash:
             df_dash = df_dash[df_dash['tipo'].isin(dash_tipos)]
 
         if not df_dash.empty:
-            # CARTÕES DE MÉTRICAS (KPIs)
             m1, m2, m3, m4 = st.columns(4)
             with m1:
                 st.metric("Total de Projetos", len(df_dash))
@@ -587,7 +688,6 @@ with aba_dash:
 
             st.divider()
 
-            # LINHA 1 DE GRÁFICOS: Quantidade por Etapa & Tempo Médio por Etapa
             g1, g2 = st.columns(2)
 
             with g1:
@@ -607,7 +707,6 @@ with aba_dash:
                 st.plotly_chart(fig_status, use_container_width=True)
 
             with g2:
-                # Cálculo de tempo médio em Horas
                 avg_proj = (df_dash['tempo_projeto_sec'].fillna(0).mean()) / 3600
                 avg_steel = (df_dash['tempo_steel_sec'].fillna(0).mean()) / 3600
                 avg_sankhya = (df_dash['tempo_sankhya_sec'].fillna(0).mean()) / 3600
@@ -632,7 +731,6 @@ with aba_dash:
 
             st.divider()
 
-            # LINHA 2 DE GRÁFICOS: Torres por Cliente & Distribuição de Peso por Responsável
             g3, g4 = st.columns(2)
 
             with g3:
