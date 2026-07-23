@@ -690,12 +690,12 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS (Letras maiores e sem informação de peso)
+# 2. KANBAN MULTI-ETAPAS (Fontes maiores, checkbox de seleção e avanço em lote)
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
-    with st.expander("🔍 Filtros do Kanban", expanded=True):
-        fk_c1, fk_c2 = st.columns([2, 2])
+    with st.expander("🔍 Filtros e Ações em Lote do Kanban", expanded=True):
+        fk_c1, fk_c2, fk_c3 = st.columns([2, 2, 1])
         with fk_c1:
             busca_kanban = st.text_input(
                 "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I):", 
@@ -710,6 +710,22 @@ with aba_kanban:
                 default=etapas_todas,
                 key="etapas_kanban_multiselect"
             )
+        with fk_c3:
+            st.write("") # espaçamento
+            if st.button("🚀 Avançar Selecionados", use_container_width=True, help="Avança todos os cards marcados para a próxima etapa"):
+                proximo_map = {"Projeto": "Steel", "Steel": "Sankhya", "Sankhya": "Concluído"}
+                atualizados = 0
+                for _, item in df_global.iterrows():
+                    if st.session_state.get(f"sel_card_{item['id']}", False):
+                        st_proj = item['status_projeto']
+                        if st_proj in proximo_map:
+                            acao_finalizar_etapa(item['id'], st_proj, proximo_map[st_proj])
+                            atualizados += 1
+                if atualizados > 0:
+                    st.success(f"{atualizados} projetos avançados com sucesso!")
+                    st.rerun()
+                else:
+                    st.warning("Nenhum projeto elegível selecionado.")
 
     df_kanban = df_global.copy()
     if busca_kanban:
@@ -748,9 +764,11 @@ with aba_kanban:
                     etapa_key = etapa_coluna.lower()
                     
                     with st.container(border=True):
-                        c_card_h1, c_card_h2 = st.columns([4, 1])
+                        c_card_chk, c_card_h1, c_card_h2 = st.columns([0.4, 3.6, 1])
+                        with c_card_chk:
+                            st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
                         with c_card_h1:
-                            st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-weight:700; font-size:16px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
                                 st.caption("Editar / Excluir")
@@ -784,9 +802,9 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        # Card com tamanho de fonte aumentado (13.5px) e sem informação de peso
+                        # Card com tamanho de fonte aumentado (15.5px) e sem informação de peso
                         st.markdown(f"""
-                        <div style="background-color: #1e293b; padding: 8px 10px; border-radius: 6px; font-size: 13.5px; line-height: 1.6; color: #cbd5e1; margin-top: 6px; margin-bottom: 8px; border: 1px solid #334155;">
+                        <div style="background-color: #1e293b; padding: 10px 12px; border-radius: 6px; font-size: 15.5px; line-height: 1.6; color: #cbd5e1; margin-top: 6px; margin-bottom: 8px; border: 1px solid #334155;">
                             ⚡ <b>Acion:</b> {item['acionamento']}<br>
                             🏢 <b>Cli:</b> {item['cliente']}<br>
                             📍 <b>Site I:</b> {site1_val}<br>
@@ -799,7 +817,7 @@ with aba_kanban:
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            st.markdown(f"<div style='font-size:13px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:14px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:13px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
