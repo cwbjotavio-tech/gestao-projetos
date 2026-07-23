@@ -221,6 +221,17 @@ def obter_tempo_decorrido_etapa(item, etapa_key):
             pass
     return sec
 
+def obter_valor_coluna(row_dict, nomes_possiveis, padrao=""):
+    """Busca um valor no dicionário da linha testando múltiplos nomes de colunas possíveis."""
+    row_norm = {str(k).strip().lower(): v for k, v in row_dict.items()}
+    for nome in nomes_possiveis:
+        nome_norm = nome.strip().lower()
+        if nome_norm in row_norm:
+            val = row_norm[nome_norm]
+            if pd.notna(val) and str(val).strip() != "" and str(val).lower() != "nan":
+                return str(val).strip()
+    return padrao
+
 def acao_iniciar_relogio(torre_id, etapa_key):
     now_iso = datetime.now().isoformat()
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -346,6 +357,7 @@ col_title, col_b1, col_b2 = st.columns([5, 2, 2])
 with col_title:
     st.title("🏗️ Controle de Torres")
 
+# --- IMPORTAÇÃO DE PLANILHA CORRIGIDA ---
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
@@ -353,27 +365,57 @@ with col_b1:
         if uploaded_file and st.button("Confirmar Importação"):
             try:
                 df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+                
+                registros_inseridos = 0
                 with get_connection() as conn:
                     cursor = conn.cursor()
                     for _, row in df_imp.iterrows():
+                        row_dict = row.to_dict()
+                        
+                        acionamento = obter_valor_coluna(row_dict, ['acionamento', 'acionamento*'])
+                        projeto = obter_valor_coluna(row_dict, ['projeto', 'projeto*'])
+                        
+                        # Descarta linhas vazias sem identificação do projeto ou acionamento
+                        if not acionamento and not projeto:
+                            continue
+
+                        revisao = obter_valor_coluna(row_dict, ['revisão', 'revisao', 'rev'], '00')
+                        cliente = obter_valor_coluna(row_dict, ['cliente'], 'BTC')
+                        tipo = obter_valor_coluna(row_dict, ['tipo'], 'Torre')
+                        finalidade = obter_valor_coluna(row_dict, ['finalidade'], 'Fabricação')
+                        
+                        peso_raw = obter_valor_coluna(row_dict, ['peso (kg)', 'peso', 'peso_kg'], '0')
+                        try:
+                            peso = float(str(peso_raw).replace(',', '.'))
+                        except ValueError:
+                            peso = 0.0
+
+                        site_1 = obter_valor_coluna(row_dict, ['site i', 'site 1', 'site_1', 'site1'])
+                        site_2 = obter_valor_coluna(row_dict, ['site ii', 'site 2', 'site_2', 'site2'])
+                        num_serie = obter_valor_coluna(row_dict, ['nº. série', 'nº série', 'num serie', 'num_serie', 'série', 'serie'])
+                        local = obter_valor_coluna(row_dict, ['local'])
+                        elemento = obter_valor_coluna(row_dict, ['elemento'])
+                        responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
+                        prazo = obter_valor_coluna(row_dict, ['prazo'], (datetime.now() + timedelta(days=7)).strftime("%d/%m/%Y"))
+                        observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
+
                         cursor.execute('''
-                            INSERT INTO torres (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, data, observacoes, status_projeto)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
+                            INSERT INTO torres (
+                                acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                                site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                                data, observacoes, status_projeto
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
                         ''', (
-                            str(row.get('acionamento', '')),
-                            str(row.get('projeto', '')),
-                            str(row.get('cliente', 'BTC')),
-                            str(row.get('tipo', 'Torre')),
-                            str(row.get('finalidade', 'Fabricação')),
-                            float(row.get('peso', 0.0) if pd.notna(row.get('peso')) else 0.0),
-                            str(row.get('responsavel', 'Support')),
-                            str(row.get('prazo', datetime.now().strftime("%d/%m/%Y"))),
-                            datetime.now().strftime("%d/%m/%Y"),
-                            str(row.get('observacoes', 'Importado via planilha'))
+                            acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                            site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                            datetime.now().strftime("%d/%m/%Y"), observacoes
                         ))
+                        registros_inseridos += 1
+
                     conn.commit()
                 st.cache_data.clear()
-                st.success("Planilha importada com sucesso!")
+                st.success(f"{registros_inseridos} registros importados com sucesso!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro ao importar: {e}")
@@ -553,7 +595,6 @@ with aba_lista:
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
-    # --- FILTROS DO KANBAN ---
     with st.expander("🔍 Filtros do Kanban", expanded=True):
         fk_c1, fk_c2 = st.columns([2, 2])
         with fk_c1:
@@ -565,13 +606,12 @@ with aba_kanban:
         with fk_c2:
             etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
             etapas_selecionadas = st.multiselect(
-                " Exibir Etapas:", 
+                "Exibir Etapas:", 
                 options=etapas_todas,
                 default=etapas_todas,
                 key="etapas_kanban_multiselect"
             )
 
-    # Filtragem dos dados do Kanban
     df_kanban = df_global.copy()
     if busca_kanban:
         b_term = busca_kanban.lower()
@@ -598,7 +638,6 @@ with aba_kanban:
             with cols_k[idx]:
                 st.markdown(f"#### {icones_map[etapa_coluna]}")
                 
-                # Registros pertencentes à etapa atual
                 df_etapa = df_kanban[df_kanban['status_projeto'] == etapa_coluna]
                 
                 if df_etapa.empty:
