@@ -121,7 +121,7 @@ st.markdown("""
         background-color: #1d4ed8 !important;
     }
 
-    /* Redução Extrema de Espaçamentos nos Cards do Kanban */
+    /* Card Container no Kanban */
     div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
         padding: 0px !important;
     }
@@ -441,7 +441,7 @@ if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
 # --- APLICAÇÃO PRINCIPAL ---
 df_global = carregar_dados()
 
-# CABEÇALHO COM ALINHAMENTO VERTICAL PERFEITO E SEM O ÍCONE DE GUINDASTE
+# CABEÇALHO
 col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 
 with col_title:
@@ -690,8 +690,10 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS ULTRA COMPACTO
+# 2. KANBAN MULTI-ETAPAS
 with aba_kanban:
+    # Espaçamento para abaixar levemente o título
+    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
     st.subheader("📊 Kanban Multi-Etapas")
     
     with st.expander("🔍 Filtros do Kanban", expanded=True):
@@ -750,7 +752,8 @@ with aba_kanban:
                     with st.container(border=True):
                         c_card_h1, c_card_h2 = st.columns([4, 1])
                         with c_card_h1:
-                            st.markdown(f"<div style='font-weight:700; font-size:13px; color:#f8fafc; line-height:1.2;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
+                            # FONTE AUMENTADA: Título do card (15px)
+                            st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
                                 st.caption("Editar / Excluir")
@@ -784,9 +787,9 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        # Layout compacto de informações
+                        # FONTE AUMENTADA: Detalhes do card (13px)
                         st.markdown(f"""
-                        <div style="font-size: 11px; line-height: 1.35; color: #cbd5e1; margin-top: 2px; margin-bottom: 4px;">
+                        <div style="font-size: 13px; line-height: 1.4; color: #cbd5e1; margin-top: 4px; margin-bottom: 6px;">
                             ⚡ <b>Acion:</b> {item['acionamento']} | 🏢 <b>Cli:</b> {item['cliente']}<br>
                             📍 <b>Site I:</b> {site1_val} | 🔢 <b>Nº Série:</b> {num_serie_val}
                         </div>
@@ -797,11 +800,11 @@ with aba_kanban:
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            st.markdown(f"<div style='font-size:11px; font-weight:600; margin-bottom:4px;'>⏱️ <code style='font-size:10px; padding:1px 3px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
+                            # FONTE AUMENTADA: Cronômetro (12px)
+                            st.markdown(f"<div style='font-size:13px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
-                            # Três botões em linha compacta: Iniciar/Pausar, Avançar e Cancelar
                             c_btn1, c_btn2, c_btn3 = st.columns(3)
                             with c_btn1:
                                 if item['estado_relogio'] == 'parado':
@@ -825,25 +828,47 @@ with aba_kanban:
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
 
-# 3. DASHBOARDS
+# 3. DASHBOARDS (FOCO EM QUANTIDADE E TEMPO - SEM PESO)
 with aba_dash:
-    st.subheader("📈 Dashboard de Desempenho e Indicadores")
+    st.subheader("📈 Dashboard de Quantidades, Tempos e Desempenho")
     if not df_global.empty:
-        with st.expander("🔍 Filtros do Dashboard", expanded=True):
-            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        # Tratamento de datas para o filtro de Ano e Mês
+        df_dash_base = df_global.copy()
+        df_dash_base['data_dt'] = pd.to_datetime(df_dash_base['data'], format='%d/%m/%Y', errors='coerce')
+        df_dash_base['ano'] = df_dash_base['data_dt'].dt.year
+        df_dash_base['mes_num'] = df_dash_base['data_dt'].dt.month
+        
+        meses_map = {1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun', 7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez'}
+        df_dash_base['mes_nome'] = df_dash_base['mes_num'].map(meses_map)
+
+        with st.expander("🔍 Filtros Avançados do Dashboard", expanded=True):
+            col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
-                dash_clientes = st.multiselect("Filtrar por Cliente:", options=df_global['cliente'].dropna().unique(), key="dash_cli")
+                anos_disponiveis = sorted([int(a) for a in df_dash_base['ano'].dropna().unique()])
+                dash_anos = st.multiselect("Filtrar por Ano:", options=anos_disponiveis, key="dash_ano")
             with col_f2:
-                dash_responsaveis = st.multiselect("Filtrar por Responsável:", options=df_global['responsavel'].dropna().unique(), key="dash_resp")
+                meses_ordem = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+                dash_meses = st.multiselect("Filtrar por Mês:", options=meses_ordem, key="dash_mes")
             with col_f3:
-                dash_tipos = st.multiselect("Filtrar por Tipo:", options=df_global['tipo'].dropna().unique(), key="dash_tipo")
+                dash_clientes = st.multiselect("Filtrar por Cliente:", options=df_dash_base['cliente'].dropna().unique(), key="dash_cli")
+
+            col_f4, col_f5, col_f6 = st.columns(3)
             with col_f4:
+                dash_responsaveis = st.multiselect("Filtrar por Responsável:", options=df_dash_base['responsavel'].dropna().unique(), key="dash_resp")
+            with col_f5:
+                dash_tipos = st.multiselect("Filtrar por Tipo:", options=df_dash_base['tipo'].dropna().unique(), key="dash_tipo")
+            with col_f6:
                 dash_situacao = st.multiselect("Filtrar por Situação:", options=["Em Progresso", "Finalizado", "Cancelado"], key="dash_situacao")
 
-        df_dash = df_global.copy()
+        df_dash = df_dash_base.copy()
         if not df_dash.empty:
             df_dash['situacao_filtro'] = df_dash['status_projeto'].apply(classificar_situacao)
 
+        # Aplicando os filtros selecionados
+        if dash_anos:
+            df_dash = df_dash[df_dash['ano'].isin(dash_anos)]
+        if dash_meses:
+            df_dash = df_dash[df_dash['mes_nome'].isin(dash_meses)]
         if dash_clientes:
             df_dash = df_dash[df_dash['cliente'].isin(dash_clientes)]
         if dash_responsaveis:
@@ -854,6 +879,15 @@ with aba_dash:
             df_dash = df_dash[df_dash['situacao_filtro'].isin(dash_situacao)]
 
         if not df_dash.empty:
+            # Cálculo de Tempo Total Acumulado em Horas
+            tempo_total_sec = (
+                df_dash['tempo_projeto_sec'].fillna(0) +
+                df_dash['tempo_steel_sec'].fillna(0) +
+                df_dash['tempo_sankhya_sec'].fillna(0)
+            ).sum()
+            horas_totais = tempo_total_sec / 3600
+
+            # MÉTRICAS FOCADAS EM QUANTIDADE E TEMPO
             m1, m2, m3, m4 = st.columns(4)
             with m1:
                 st.metric("Total de Projetos", len(df_dash))
@@ -862,10 +896,11 @@ with aba_dash:
             with m3:
                 st.metric("Concluídos", len(df_dash[df_dash['status_projeto'] == 'Concluído']))
             with m4:
-                st.metric("Peso Total", f"{df_dash['peso'].sum():,.1f} kg")
+                st.metric("Tempo Total Dedicado", f"{horas_totais:,.1f} h")
 
             st.divider()
 
+            # LINHA 1 DE GRÁFICOS
             g1, g2 = st.columns(2)
 
             with g1:
@@ -909,33 +944,55 @@ with aba_dash:
 
             st.divider()
 
+            # LINHA 2 DE GRÁFICOS (Evolução Temporal & Tempo por Responsável)
             g3, g4 = st.columns(2)
 
             with g3:
-                df_cli = df_dash['cliente'].value_counts().reset_index()
-                df_cli.columns = ['cliente', 'count']
-                fig_bar = px.bar(
-                    df_cli,
-                    x='cliente', y='count',
-                    title="🏢 Quantidade de Torres por Cliente",
-                    labels={'cliente': 'Cliente', 'count': 'Quantidade'},
-                    text_auto=True,
-                    template="plotly_dark",
-                    color_discrete_sequence=['#2563eb']
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
+                # Evolução mensal de novos cadastros
+                df_ev = df_dash.dropna(subset=['ano', 'mes_num']).groupby(['ano', 'mes_num', 'mes_nome']).size().reset_index(name='qtd')
+                df_ev['ano'] = df_ev['ano'].astype(int)
+                df_ev = df_ev.sort_values(by=['ano', 'mes_num'])
+                df_ev['Mês/Ano'] = df_ev['mes_nome'] + '/' + df_ev['ano'].astype(str)
+
+                if not df_ev.empty:
+                    fig_ev = px.bar(
+                        df_ev,
+                        x='Mês/Ano', y='qtd',
+                        title="📅 Evolução de Cadastros por Mês/Ano",
+                        labels={'Mês/Ano': 'Período', 'qtd': 'Novos Projetos'},
+                        text_auto=True,
+                        template="plotly_dark",
+                        color_discrete_sequence=['#38bdf8']
+                    )
+                    st.plotly_chart(fig_ev, use_container_width=True)
+                else:
+                    st.info("Sem dados temporais suficientes para exibir a evolução mensal.")
 
             with g4:
-                df_resp_peso = df_dash.groupby('responsavel')['peso'].sum().reset_index()
-                fig_peso = px.pie(
-                    df_resp_peso,
-                    values='peso', names='responsavel',
-                    title="⚖️ Peso Total (kg) por Responsável",
-                    hole=0.4,
+                # Total de Horas por Responsável
+                df_dash['total_horas_item'] = (
+                    df_dash['tempo_projeto_sec'].fillna(0) +
+                    df_dash['tempo_steel_sec'].fillna(0) +
+                    df_dash['tempo_sankhya_sec'].fillna(0)
+                ) / 3600
+                
+                df_resp_horas = df_dash.groupby('responsavel')['total_horas_item'].sum().reset_index()
+                df_resp_horas.columns = ['responsavel', 'horas_totais']
+                df_resp_horas['horas_totais'] = df_resp_horas['horas_totais'].round(1)
+
+                fig_resp_horas = px.bar(
+                    df_resp_horas,
+                    x='responsavel', y='horas_totais',
+                    title="⏳ Horas Totais Registradas por Responsável",
+                    labels={'responsavel': 'Responsável', 'horas_totais': 'Horas Dedicadas'},
+                    text_auto='.1f',
                     template="plotly_dark",
+                    color='responsavel',
                     color_discrete_sequence=px.colors.qualitative.Pastel
                 )
-                st.plotly_chart(fig_peso, use_container_width=True)
+                fig_resp_horas.update_layout(showlegend=False)
+                st.plotly_chart(fig_resp_horas, use_container_width=True)
+
         else:
             st.warning("Nenhum projeto encontrado com os filtros selecionados.")
     else:
