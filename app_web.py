@@ -20,9 +20,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado - Modo Escuro Slate Dark Compacto
+# 2. CSS Customizado - Modo Escuro Slate Dark Otimizado e Compacto
 st.markdown("""
     <style>
+    /* Otimização de Espaço do Topo e Margens da Página */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 100% !important;
+    }
+
     /* Fundo Geral da Aplicação */
     .stApp {
         background-color: #0f172a !important;
@@ -30,16 +39,33 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Textos e Títulos */
-    h1, h2, h3, h4, h5, h6, label, p, span, div, .stMarkdown {
+    /* Redução de Margens de Títulos */
+    h1 {
+        font-size: 1.75rem !important;
+        margin-top: 0px !important;
+        margin-bottom: 0px !important;
+        padding-top: 0px !important;
+        font-weight: 700 !important;
+    }
+
+    h2, h3, h4, h5, h6 {
+        margin-top: 0.25rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    label, p, span, div, .stMarkdown {
         color: #f8fafc !important;
     }
 
     /* Estilização das Abas (Tabs) */
+    .stTabs {
+        margin-top: 0.5rem !important;
+    }
+
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background-color: #1e293b !important;
-        padding: 6px;
+        padding: 4px;
         border-radius: 8px;
         border: 1px solid #334155;
     }
@@ -47,8 +73,8 @@ st.markdown("""
         color: #94a3b8 !important;
         font-weight: 600;
         border-radius: 6px;
-        padding: 8px 14px;
-        font-size: 14px;
+        padding: 6px 12px;
+        font-size: 13px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #2563eb !important;
@@ -85,11 +111,11 @@ st.markdown("""
     .stButton > button, div[data-testid="stPopover"] > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
-        border: none !important;
+        border: 1px solid #3b82f6 !important;
         border-radius: 6px !important;
         font-weight: 600 !important;
-        padding: 2px 6px !important;
-        font-size: 12px !important;
+        padding: 4px 10px !important;
+        font-size: 13px !important;
     }
     .stButton > button:hover, div[data-testid="stPopover"] > button:hover {
         background-color: #1d4ed8 !important;
@@ -117,7 +143,7 @@ st.markdown("""
     [data-testid="stMetric"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
-        padding: 12px !important;
+        padding: 10px !important;
         border-radius: 8px !important;
     }
     </style>
@@ -380,7 +406,7 @@ def carregar_dados():
 
 # --- TELA DE LOGIN E SESSÃO ---
 if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = True  # Mantém logado por padrão após inatividade
+    st.session_state["autenticado"] = True
     st.session_state["usuario_nome"] = "Administrador"
     st.session_state["usuario_login"] = "admin"
 
@@ -415,9 +441,11 @@ if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
 # --- APLICAÇÃO PRINCIPAL ---
 df_global = carregar_dados()
 
-col_title, col_b1, col_b2 = st.columns([5, 2, 2])
+# CABEÇALHO COM ALINHAMENTO VERTICAL PERFEITO E SEM O ÍCONE DE GUINDASTE
+col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
+
 with col_title:
-    st.title("🏗️ Controle de Torres")
+    st.title("Controle de Torres")
 
 # --- IMPORTAÇÃO DE PLANILHA ---
 with col_b1:
