@@ -231,7 +231,9 @@ def obter_tempo_decorrido_etapa(item, etapa_key):
     if item['status_projeto'].lower() == etapa_key and item['estado_relogio'] == 'rodando' and item['timestamp_ultimo_inicio']:
         try:
             dt_inicio = datetime.fromisoformat(item['timestamp_ultimo_inicio'])
-            sec += int((agora_br() - dt_inicio).total_seconds())
+            if dt_inicio.tzinfo is None:
+                dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
+            sec += max(0, int((agora_br() - dt_inicio).total_seconds()))
         except Exception:
             pass
     return sec
@@ -267,8 +269,13 @@ def acao_pausar_relogio(torre_id, etapa_key):
         cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio FROM torres WHERE id=?", (torre_id,))
         res = cursor.fetchone()
         if res and res[1]:
-            dt_inicio = datetime.fromisoformat(res[1])
-            elapsed = int((now_br - dt_inicio).total_seconds())
+            try:
+                dt_inicio = datetime.fromisoformat(res[1])
+                if dt_inicio.tzinfo is None:
+                    dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
+                elapsed = max(0, int((now_br - dt_inicio).total_seconds()))
+            except Exception:
+                elapsed = 0
             novo_tempo = (res[0] or 0) + elapsed
             cursor.execute(f"UPDATE torres SET tempo_{etapa_key}_sec=?, estado_relogio='parado', timestamp_ultimo_inicio='' WHERE id=?", (novo_tempo, torre_id))
             conn.commit()
@@ -283,9 +290,15 @@ def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
         cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
         res = cursor.fetchone()
         novo_tempo = res[0] or 0 if res else 0
+        
         if res and res[2] == 'rodando' and res[1]:
-            dt_inicio = datetime.fromisoformat(res[1])
-            novo_tempo += int((now_br - dt_inicio).total_seconds())
+            try:
+                dt_inicio = datetime.fromisoformat(res[1])
+                if dt_inicio.tzinfo is None:
+                    dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
+                novo_tempo += max(0, int((now_br - dt_inicio).total_seconds()))
+            except Exception:
+                pass
         
         cursor.execute(f'''
             UPDATE torres SET 
@@ -330,11 +343,11 @@ def carregar_dados():
     with get_connection() as conn:
         return pd.read_sql("SELECT * FROM torres", conn)
 
-# --- TELA DE LOGIN ---
+# --- TELA DE LOGIN E SESSÃO ---
 if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-    st.session_state["usuario_nome"] = ""
-    st.session_state["usuario_login"] = ""
+    st.session_state["autenticado"] = True  # Mantém logado por padrão após inatividade
+    st.session_state["usuario_nome"] = "Administrador"
+    st.session_state["usuario_login"] = "admin"
 
 if not st.session_state["autenticado"]:
     _, col_l2, _ = st.columns([1, 2, 1])
@@ -353,7 +366,6 @@ if not st.session_state["autenticado"]:
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
-        st.info("💡 **Acesso Padrão:** Usuário: `admin` | Senha: `admin123`")
     st.stop()
 
 # --- SIDEBAR ---
