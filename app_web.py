@@ -205,7 +205,13 @@ def formatar_segundos(segundos):
     return f"{horas:02d}:{minutos:02d}:{segs:02d}"
 
 def obter_tempo_decorrido_etapa(item, etapa_key):
-    sec = item[f'tempo_{etapa_key}_sec'] or 0
+    coluna = f'tempo_{etapa_key}_sec'
+    
+    # Prevenção contra KeyError caso a coluna não exista no registro
+    if coluna not in item or pd.isna(item[coluna]):
+        return 0
+    
+    sec = item[coluna] or 0
     if item['status_projeto'].lower() == etapa_key and item['estado_relogio'] == 'rodando' and item['timestamp_ultimo_inicio']:
         try:
             dt_inicio = datetime.fromisoformat(item['timestamp_ultimo_inicio'])
@@ -249,7 +255,7 @@ def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
         cursor = conn.cursor()
         cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
         res = cursor.fetchone()
-        novo_tempo = res[0] or 0
+        novo_tempo = res[0] or 0 if res else 0
         if res and res[2] == 'rodando' and res[1]:
             dt_inicio = datetime.fromisoformat(res[1])
             novo_tempo += int((now - dt_inicio).total_seconds())
@@ -472,17 +478,18 @@ with aba_kanban:
                     st.markdown(f"**#{id_item} - {item['projeto']}**")
                     st.caption(f"**Cliente:** {item['cliente']} | **Prazo:** {item['prazo']}")
                     
-                    segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key)
+                    # Calcula o tempo apenas se for uma etapa técnica com cronômetro
+                    segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key) if etapa_key in ['projeto', 'steel', 'sankhya'] else 0
                     tempo_str = formatar_segundos(segundos_etapa)
                     
                     if is_etapa_ativa:
-                        st.markdown(f"⏱️ **Tempo na Etapa:** `{tempo_str}`")
-                        if item['estado_relogio'] == 'rodando':
-                            st.caption("🟢 **Em Execução**")
-                        else:
-                            st.caption("🔴 **Pausado/Aguardando**")
-
                         if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
+                            st.markdown(f"⏱️ **Tempo na Etapa:** `{tempo_str}`")
+                            if item['estado_relogio'] == 'rodando':
+                                st.caption("🟢 **Em Execução**")
+                            else:
+                                st.caption("🔴 **Pausado/Aguardando**")
+
                             proxima_etapa = etapas_ordem[etapas_ordem.index(etapa_coluna) + 1]
                             
                             c_btn1, c_btn2 = st.columns(2)
@@ -504,6 +511,10 @@ with aba_kanban:
                             if st.button("🚫 Cancelar Projeto", key=f"canc_{id_item}_{etapa_key}", use_container_width=True):
                                 acao_finalizar_etapa(id_item, etapa_coluna, "Cancelado")
                                 st.rerun()
+                        elif etapa_coluna == "Concluído":
+                            st.success("✅ Projeto Concluído")
+                        elif etapa_coluna == "Cancelado":
+                            st.error("🚫 Projeto Cancelado")
 
                         c_ed1, c_ed2 = st.columns(2)
                         with c_ed1:
