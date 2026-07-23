@@ -13,31 +13,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado para Correção de Contrastes e Tema Profissional
+# 2. CSS Customizado para MODO ESCURO NATIVO (Alta Legibilidade)
 st.markdown("""
     <style>
-    /* Estilo Geral da Aplicação */
+    /* Fundo Geral da Aplicação */
     .stApp {
-        background-color: #f8fafc;
-        color: #0f172a;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #0f172a !important;
+        color: #f8fafc !important;
+        font-family: 'Inter', sans-serif;
     }
     
-    /* Forçar cor legível em todos os Títulos e Textos */
-    h1, h2, h3, h4, h5, h6, label, p, span, .stMarkdown {
-        color: #0f172a !important;
+    /* Textos, Títulos e Rótulos em Branco/Claro */
+    h1, h2, h3, h4, h5, h6, label, p, span, div, .stMarkdown {
+        color: #f8fafc !important;
     }
 
     /* Estilização das Abas (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
-        background-color: #ffffff;
+        background-color: #1e293b !important;
         padding: 8px;
         border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border: 1px solid #334155;
     }
     .stTabs [data-baseweb="tab"] {
-        color: #475569 !important;
+        color: #94a3b8 !important;
         font-weight: 600;
         border-radius: 6px;
         padding: 8px 16px;
@@ -47,27 +47,65 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* Entradas de Texto / Inputs */
-    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        border: 1px solid #cbd5e1 !important;
+    /* Campos de Entrada de Texto, Busca e Selects */
+    input, select, textarea, div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+        border: 1px solid #334155 !important;
         border-radius: 6px !important;
     }
+    
+    /* Placeholders visíveis */
+    ::placeholder {
+        color: #94a3b8 !important;
+        opacity: 1;
+    }
 
-    /* Cards do Kanban e Formulários */
-    .css-card {
-        background-color: #ffffff;
-        padding: 16px;
+    /* Menus Suspensos / Dropdowns */
+    div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+    }
+    li[role="option"] {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+    }
+    li[role="option"]:hover {
+        background-color: #334155 !important;
+    }
+
+    /* Estilo dos Botões e Popover */
+    .stButton > button, div[data-testid="stPopover"] > button {
+        background-color: #2563eb !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s;
+    }
+    .stButton > button:hover, div[data-testid="stPopover"] > button:hover {
+        background-color: #1d4ed8 !important;
+        color: #ffffff !important;
+    }
+
+    /* Containers e Cards */
+    div[data-testid="stForm"] {
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+        padding: 20px !important;
+    }
+
+    /* Tabela / Dataframe em Modo Escuro */
+    [data-testid="stDataFrame"] {
+        background-color: #1e293b !important;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        margin-bottom: 12px;
+        border: 1px solid #334155;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE SEGURANÇA E BANCO DE DADOS ---
+# --- BANCO DE DADOS E SEGURANÇA ---
 def get_connection():
     return sqlite3.connect("gestao_torres.db", check_same_thread=False)
 
@@ -109,7 +147,7 @@ def init_db():
             )
         ''')
         
-        # Criar usuário administrador padrão se não existir
+        # Criar admin padrão se não existir
         cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
         if not cursor.fetchone():
             cursor.execute(
@@ -145,6 +183,7 @@ def carregar_dados():
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
+    st.session_state["usuario_login"] = ""
 
 # TELA DE LOGIN
 if not st.session_state["autenticado"]:
@@ -153,27 +192,31 @@ if not st.session_state["autenticado"]:
         st.write("<br><br>", unsafe_allow_html=True)
         with st.form("form_login"):
             st.title("🔐 Acesso ao Sistema")
-            st.subheader("Controle de Torres e Projetos")
+            st.caption("Digite suas credenciais para continuar")
             usuario = st.text_input("Usuário")
             senha = st.text_input("Senha", type="password")
-            btn_entrar = st.form_submit_button("Entrar", use_container_width=True)
+            btn_entrar = st.form_submit_button("Entrar no Sistema", use_container_width=True)
             
             if btn_entrar:
                 user_info = autenticar_usuario(usuario, senha)
                 if user_info:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_nome"] = user_info[0]
+                    st.session_state["usuario_login"] = usuario
                     st.success("Login realizado com sucesso!")
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
-        st.info("💡 **Acesso Inicial Padrão:** Usuário: `admin` | Senha: `admin123`")
+        st.info("💡 **Acesso Padrão Inicial:** Usuário: `admin` | Senha: `admin123`")
     st.stop()
 
 # --- BARRA LATERAL (SIDEBAR) ---
-st.sidebar.markdown(f"👤 **Usuário:** {st.session_state['usuario_nome']}")
+st.sidebar.markdown(f"👤 **Usuário Logado:**\n### {st.session_state['usuario_nome']}")
+st.sidebar.divider()
 if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
     st.session_state["autenticado"] = False
+    st.session_state["usuario_nome"] = ""
+    st.session_state["usuario_login"] = ""
     st.rerun()
 
 # --- APLICAÇÃO PRINCIPAL ---
@@ -211,11 +254,12 @@ with col_btn:
                     st.error("Campos obrigatórios faltando.")
 
 # ABAS DA APLICAÇÃO
-aba_lista, aba_kanban, aba_dash, aba_cancelados = st.tabs([
+aba_lista, aba_kanban, aba_dash, aba_cancelados, aba_usuarios = st.tabs([
     "📋 Listagem e Filtros", 
     "📊 Kanban Interativo", 
     "📈 Dashboards", 
-    "🚫 Cancelados"
+    "🚫 Cancelados",
+    "👥 Usuários"
 ])
 
 # 1. LISTA E FILTROS
@@ -298,6 +342,7 @@ with aba_dash:
                 x='cliente', y='count',
                 title="Torres por Cliente",
                 labels={'cliente': 'Cliente', 'count': 'Quantidade'},
+                template="plotly_dark",
                 color_discrete_sequence=['#2563eb']
             )
             st.plotly_chart(fig_bar, use_container_width=True)
@@ -306,6 +351,7 @@ with aba_dash:
                 df_global, names='status_projeto',
                 title="Status dos Projetos",
                 hole=0.4,
+                template="plotly_dark",
                 color_discrete_sequence=['#f59e0b', '#3b82f6', '#10b981']
             )
             st.plotly_chart(fig_pie, use_container_width=True)
@@ -318,3 +364,59 @@ with aba_cancelados:
         st.dataframe(df_canc, use_container_width=True)
     else:
         st.info("Nenhum projeto cancelado.")
+
+# 5. GERENCIAMENTO DE USUÁRIOS (NOVO)
+with aba_usuarios:
+    st.subheader("👥 Gerenciamento de Usuários do Sistema")
+    
+    col_u1, col_u2 = st.columns([1, 1])
+    
+    with col_u1:
+        st.markdown("### ➕ Cadastrar Novo Usuário")
+        with st.form("form_novo_usuario", clear_on_submit=True):
+            novo_username = st.text_input("Nome de Usuário (Login) *")
+            novo_nome = st.text_input("Nome Completo *")
+            nova_senha = st.text_input("Senha *", type="password")
+            
+            if st.form_submit_button("Cadastrar Usuário", use_container_width=True):
+                if novo_username and novo_nome and nova_senha:
+                    try:
+                        with get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                "INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
+                                (novo_username, hash_password(nova_senha), novo_nome)
+                            )
+                            conn.commit()
+                        st.success(f"Usuário '{novo_username}' cadastrado com sucesso!")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Erro: Este nome de usuário já existe no sistema!")
+                else:
+                    st.error("Preencha todos os campos obrigatórios.")
+
+    with col_u2:
+        st.markdown("### 📋 Usuários Cadastrados")
+        with get_connection() as conn:
+            df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", conn)
+        st.dataframe(df_users, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        st.markdown("### 🗑️ Excluir Usuário")
+        user_to_delete = st.selectbox(
+            "Selecione um usuário para remover", 
+            df_users["username"].unique() if not df_users.empty else []
+        )
+        
+        if st.button("Remover Usuário Selecionado", use_container_width=True):
+            if user_to_delete == "admin":
+                st.error("O usuário 'admin' principal não pode ser excluído!")
+            elif user_to_delete == st.session_state["usuario_login"]:
+                st.error("Você não pode excluir seu próprio usuário enquanto está logado!")
+            else:
+                with get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM usuarios WHERE username = ?", (user_to_delete,))
+                    conn.commit()
+                st.success(f"Usuário '{user_to_delete}' removido!")
+                st.rerun()
