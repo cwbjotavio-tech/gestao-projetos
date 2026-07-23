@@ -690,7 +690,7 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS (Ajustado para melhor legibilidade dos dados)
+# 2. KANBAN MULTI-ETAPAS (Letras maiores e sem informação de peso)
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
@@ -750,7 +750,7 @@ with aba_kanban:
                     with st.container(border=True):
                         c_card_h1, c_card_h2 = st.columns([4, 1])
                         with c_card_h1:
-                            st.markdown(f"<div style='font-weight:700; font-size:14px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
                                 st.caption("Editar / Excluir")
@@ -783,13 +783,12 @@ with aba_kanban:
 
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
-                        peso_val = f"{item['peso']:,.1f} kg" if item['peso'] else "-"
 
-                        # Card otimizado para visualização limpa e organizada dos dados
+                        # Card com tamanho de fonte aumentado (13.5px) e sem informação de peso
                         st.markdown(f"""
-                        <div style="background-color: #1e293b; padding: 6px 8px; border-radius: 6px; font-size: 12px; line-height: 1.5; color: #cbd5e1; margin-top: 4px; margin-bottom: 6px; border: 1px solid #334155;">
+                        <div style="background-color: #1e293b; padding: 8px 10px; border-radius: 6px; font-size: 13.5px; line-height: 1.6; color: #cbd5e1; margin-top: 6px; margin-bottom: 8px; border: 1px solid #334155;">
                             ⚡ <b>Acion:</b> {item['acionamento']}<br>
-                            🏢 <b>Cli:</b> {item['cliente']} | ⚖️ <b>Peso:</b> {peso_val}<br>
+                            🏢 <b>Cli:</b> {item['cliente']}<br>
                             📍 <b>Site I:</b> {site1_val}<br>
                             🔢 <b>Nº Série:</b> {num_serie_val}
                         </div>
@@ -800,7 +799,7 @@ with aba_kanban:
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            st.markdown(f"<div style='font-size:12px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:11px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:13px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
