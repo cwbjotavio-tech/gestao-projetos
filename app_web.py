@@ -15,12 +15,12 @@ def agora_br():
 
 # 1. Configuração da Página
 st.set_page_config(
-    page_title="Sistema de Controle de Torres",
-    page_icon="🏗️",
+    page_title="Sistema de Controle de Projetos",
+    page_icon="📊",
     layout="wide"
 )
 
-# 2. CSS Customizado - Ajustado para o Título Principal ficar 100% visível
+# 2. CSS Customizado - Ajustado para melhor legibilidade e visualização
 st.markdown("""
     <style>
     /* Otimização de Espaço do Topo com margem suficiente para o Título Principal */
@@ -39,7 +39,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Ajuste de Posição do Título H1 ("Controle de Torres") */
+    /* Ajuste de Posição do Título H1 */
     h1 {
         font-size: 1.8rem !important;
         margin-top: 0.5rem !important;
@@ -445,7 +445,7 @@ df_global = carregar_dados()
 col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 
 with col_title:
-    st.title("Controle de Torres")
+    st.title("Controle de Projetos")
 
 # --- IMPORTAÇÃO DE PLANILHA ---
 with col_b1:
@@ -510,7 +510,7 @@ with col_b1:
                 st.error(f"Erro ao importar: {e}")
 
 with col_b2:
-    with st.popover("➕ Cadastrar Torre", use_container_width=True):
+    with st.popover("➕ Cadastrar Projeto", use_container_width=True):
         st.subheader("Novo Cadastro")
         with st.form("form_nova_torre", clear_on_submit=True):
             f_acionamento = st.text_input("Acionamento *")
@@ -539,7 +539,7 @@ with col_b2:
                         ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), agora_br().strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
-                    st.success("Torre cadastrada!")
+                    st.success("Projeto cadastrado!")
                     st.rerun()
 
 # ABAS DA APLICAÇÃO
@@ -679,18 +679,18 @@ with aba_lista:
         st.write("<br>", unsafe_allow_html=True)
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_view[cols_display].to_excel(writer, index=False, sheet_name='Torres')
+            df_view[cols_display].to_excel(writer, index=False, sheet_name='Projetos')
         
         st.download_button(
             label="📥 Baixar Relatório Completo em Excel",
             data=buffer.getvalue(),
-            file_name=f"relatorio_torres_{agora_br().strftime('%Y%m%d')}.xlsx",
+            file_name=f"relatorio_projetos_{agora_br().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS
+# 2. KANBAN MULTI-ETAPAS (Ajustado para melhor legibilidade dos dados)
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
@@ -750,7 +750,7 @@ with aba_kanban:
                     with st.container(border=True):
                         c_card_h1, c_card_h2 = st.columns([4, 1])
                         with c_card_h1:
-                            st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-weight:700; font-size:14px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
                                 st.caption("Editar / Excluir")
@@ -783,11 +783,15 @@ with aba_kanban:
 
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
+                        peso_val = f"{item['peso']:,.1f} kg" if item['peso'] else "-"
 
+                        # Card otimizado para visualização limpa e organizada dos dados
                         st.markdown(f"""
-                        <div style="font-size: 13px; line-height: 1.4; color: #cbd5e1; margin-top: 4px; margin-bottom: 6px;">
-                            ⚡ <b>Acion:</b> {item['acionamento']} | 🏢 <b>Cli:</b> {item['cliente']}<br>
-                            📍 <b>Site I:</b> {site1_val} | 🔢 <b>Nº Série:</b> {num_serie_val}
+                        <div style="background-color: #1e293b; padding: 6px 8px; border-radius: 6px; font-size: 12px; line-height: 1.5; color: #cbd5e1; margin-top: 4px; margin-bottom: 6px; border: 1px solid #334155;">
+                            ⚡ <b>Acion:</b> {item['acionamento']}<br>
+                            🏢 <b>Cli:</b> {item['cliente']} | ⚖️ <b>Peso:</b> {peso_val}<br>
+                            📍 <b>Site I:</b> {site1_val}<br>
+                            🔢 <b>Nº Série:</b> {num_serie_val}
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -796,7 +800,7 @@ with aba_kanban:
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            st.markdown(f"<div style='font-size:13px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:12px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:11px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
