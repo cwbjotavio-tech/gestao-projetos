@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado para MODO ESCURO NATIVO (Alta Legibilidade)
+# 2. CSS Customizado - Modo Escuro Nativo (Slate Dark - Trello Style)
 st.markdown("""
     <style>
     /* Fundo Geral da Aplicação */
@@ -23,16 +23,16 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Textos, Títulos e Rótulos em Branco/Claro */
+    /* Textos e Títulos */
     h1, h2, h3, h4, h5, h6, label, p, span, div, .stMarkdown {
         color: #f8fafc !important;
     }
 
     /* Estilização das Abas (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 6px;
         background-color: #1e293b !important;
-        padding: 8px;
+        padding: 6px;
         border-radius: 8px;
         border: 1px solid #334155;
     }
@@ -40,14 +40,15 @@ st.markdown("""
         color: #94a3b8 !important;
         font-weight: 600;
         border-radius: 6px;
-        padding: 8px 16px;
+        padding: 8px 14px;
+        font-size: 14px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #2563eb !important;
         color: #ffffff !important;
     }
 
-    /* Campos de Entrada de Texto, Busca e Selects */
+    /* Campos de Entrada e Selects */
     input, select, textarea, div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         background-color: #1e293b !important;
         color: #f8fafc !important;
@@ -55,13 +56,12 @@ st.markdown("""
         border-radius: 6px !important;
     }
     
-    /* Placeholders visíveis */
     ::placeholder {
         color: #94a3b8 !important;
         opacity: 1;
     }
 
-    /* Menus Suspensos / Dropdowns */
+    /* Dropdowns / Menus */
     div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
         background-color: #1e293b !important;
         color: #f8fafc !important;
@@ -74,21 +74,19 @@ st.markdown("""
         background-color: #334155 !important;
     }
 
-    /* Estilo dos Botões e Popover */
+    /* Botões */
     .stButton > button, div[data-testid="stPopover"] > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
         border: none !important;
         border-radius: 6px !important;
         font-weight: 600 !important;
-        transition: background-color 0.2s;
     }
     .stButton > button:hover, div[data-testid="stPopover"] > button:hover {
         background-color: #1d4ed8 !important;
-        color: #ffffff !important;
     }
 
-    /* Containers e Cards */
+    /* Containers do Formulário */
     div[data-testid="stForm"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
@@ -96,7 +94,7 @@ st.markdown("""
         padding: 20px !important;
     }
 
-    /* Tabela / Dataframe em Modo Escuro */
+    /* Dataframe / Tabelas */
     [data-testid="stDataFrame"] {
         background-color: #1e293b !important;
         border-radius: 8px;
@@ -115,7 +113,7 @@ def hash_password(password):
 def init_db():
     with get_connection() as conn:
         cursor = conn.cursor()
-        # Tabela de Usuários
+        # Usuários
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +122,7 @@ def init_db():
                 nome TEXT NOT NULL
             )
         ''')
-        # Tabela de Torres
+        # Torres
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS torres (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,11 +141,18 @@ def init_db():
                 responsavel TEXT,
                 data TEXT,
                 prazo TEXT,
-                status_projeto TEXT DEFAULT 'A fazer'
+                status_projeto TEXT DEFAULT 'Projeto',
+                observacoes TEXT DEFAULT ''
             )
         ''')
         
-        # Criar admin padrão se não existir
+        # Migração segura para bancos existentes
+        try:
+            cursor.execute("ALTER TABLE torres ADD COLUMN observacoes TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+
+        # Admin padrão
         cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
         if not cursor.fetchone():
             cursor.execute(
@@ -174,6 +179,13 @@ def atualizar_status(torre_id, novo_status):
         conn.commit()
     st.cache_data.clear()
 
+def atualizar_observacoes(torre_id, nova_obs):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE torres SET observacoes=? WHERE id=?", (nova_obs, torre_id))
+        conn.commit()
+    st.cache_data.clear()
+
 @st.cache_data(ttl=5)
 def carregar_dados():
     with get_connection() as conn:
@@ -185,7 +197,6 @@ if "autenticado" not in st.session_state:
     st.session_state["usuario_nome"] = ""
     st.session_state["usuario_login"] = ""
 
-# TELA DE LOGIN
 if not st.session_state["autenticado"]:
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     with col_l2:
@@ -210,7 +221,7 @@ if not st.session_state["autenticado"]:
         st.info("💡 **Acesso Padrão Inicial:** Usuário: `admin` | Senha: `admin123`")
     st.stop()
 
-# --- BARRA LATERAL (SIDEBAR) ---
+# --- SIDEBAR ---
 st.sidebar.markdown(f"👤 **Usuário Logado:**\n### {st.session_state['usuario_nome']}")
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
@@ -237,15 +248,16 @@ with col_btn:
             f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
             f_responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
             f_prazo = st.date_input("Prazo de Entrega", value=datetime.now() + timedelta(days=7))
+            f_observacoes = st.text_area("Observações", placeholder="Adicione notas ou detalhes técnicos sobre o projeto...")
 
             if st.form_submit_button("Salvar Registro"):
                 if f_acionamento and f_projeto:
                     with get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
-                            INSERT INTO torres (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, data, status_projeto)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'A fazer')
-                        ''', (f_acionamento, f_projeto, f_cliente, f_tipo, f_finalidade, f_peso, f_responsavel, f_prazo.strftime("%d/%m/%Y"), datetime.now().strftime("%d/%m/%Y")))
+                            INSERT INTO torres (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, data, observacoes, status_projeto)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
+                        ''', (f_acionamento, f_projeto, f_cliente, f_tipo, f_finalidade, f_peso, f_responsavel, f_prazo.strftime("%d/%m/%Y"), datetime.now().strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
                     st.success("Torre cadastrada!")
@@ -256,7 +268,7 @@ with col_btn:
 # ABAS DA APLICAÇÃO
 aba_lista, aba_kanban, aba_dash, aba_cancelados, aba_usuarios = st.tabs([
     "📋 Listagem e Filtros", 
-    "📊 Kanban Interativo", 
+    "📊 Kanban Multi-Etapas", 
     "📈 Dashboards", 
     "🚫 Cancelados",
     "👥 Usuários"
@@ -298,38 +310,51 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN INTERATIVO
+# 2. KANBAN MULTI-ETAPAS (TRELLO STYLE)
 with aba_kanban:
-    st.subheader("Fluxo de Produção")
-    col_a_fazer, col_em_andamento, col_concluido = st.columns(3)
+    st.subheader("Acompanhamento de Etapas do Projeto")
     
-    statuses = ["A fazer", "Em andamento", "Concluído"]
-    cols = [col_a_fazer, col_em_andamento, col_concluido]
-    icones = ["📌 A Fazer", "⏳ Em Andamento", "✅ Concluído"]
+    # 5 etapas definidas no fluxo (incluindo Cancelado)
+    etapas = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
+    icones = ["📐 Projeto", "⚙️ Steel", "🏢 Sankhya", "✅ Concluído", "🚫 Cancelado"]
+    
+    cols = st.columns(5)
 
-    for idx, status in enumerate(statuses):
+    for idx, etapa in enumerate(etapas):
         with cols[idx]:
             st.markdown(f"### {icones[idx]}")
-            items = df_global[df_global["status_projeto"] == status]
+            items = df_global[df_global["status_projeto"] == etapa]
             
             for _, item in items.iterrows():
+                # Card no estilo Trello
                 with st.container(border=True):
                     st.markdown(f"**#{item['id']} - {item['projeto']}**")
-                    st.caption(f"**Cliente:** {item['cliente']} | **Peso:** {item['peso']} kg")
-                    st.caption(f"**Prazo:** {item['prazo']}")
+                    st.caption(f"**Cliente:** {item['cliente']}")
+                    st.caption(f"**Peso:** {item['peso']} kg | **Prazo:** {item['prazo']}")
                     
-                    b1, b2 = st.columns(2)
-                    if status == "A fazer":
-                        if b1.button("Mover ➔", key=f"and_{item['id']}"):
-                            atualizar_status(item['id'], "Em andamento")
+                    # Exibição/Edição de Observações
+                    obs_atual = item['observacoes'] if pd.notna(item['observacoes']) else ""
+                    if obs_atual:
+                        st.markdown(f"📌 *{obs_atual}*")
+                    
+                    with st.popover("📝 Obs", use_container_width=True):
+                        st.caption(f"Editar observações do projeto #{item['id']}")
+                        nova_obs_input = st.text_area("Observação:", value=obs_atual, key=f"obs_txt_{item['id']}")
+                        if st.button("Salvar Obs", key=f"btn_obs_{item['id']}"):
+                            atualizar_observacoes(item['id'], nova_obs_input)
                             st.rerun()
-                    elif status == "Em andamento":
-                        if b1.button("◀ Voltar", key=f"faz_{item['id']}"):
-                            atualizar_status(item['id'], "A fazer")
-                            st.rerun()
-                        if b2.button("Concluir ✅", key=f"con_{item['id']}"):
-                            atualizar_status(item['id'], "Concluído")
-                            st.rerun()
+
+                    # Movimentação livre para qualquer etapa
+                    etapa_selecionada = st.selectbox(
+                        "Mover para:",
+                        options=etapas,
+                        index=etapas.index(etapa),
+                        key=f"move_{item['id']}"
+                    )
+                    
+                    if etapa_selecionada != etapa:
+                        atualizar_status(item['id'], etapa_selecionada)
+                        st.rerun()
 
 # 3. DASHBOARDS
 with aba_dash:
@@ -349,23 +374,23 @@ with aba_dash:
         with d2:
             fig_pie = px.pie(
                 df_global, names='status_projeto',
-                title="Status dos Projetos",
+                title="Distribuição por Etapa",
                 hole=0.4,
                 template="plotly_dark",
-                color_discrete_sequence=['#f59e0b', '#3b82f6', '#10b981']
+                color_discrete_sequence=px.colors.qualitative.Set2
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-# 4. CANCELADOS
+# 4. CANCELADOS (Filtro Direto)
 with aba_cancelados:
     st.subheader("🚫 Projetos Cancelados")
     df_canc = df_global[df_global["status_projeto"] == "Cancelado"]
     if not df_canc.empty:
         st.dataframe(df_canc, use_container_width=True)
     else:
-        st.info("Nenhum projeto cancelado.")
+        st.info("Nenhum projeto cancelado registrado.")
 
-# 5. GERENCIAMENTO DE USUÁRIOS (NOVO)
+# 5. GERENCIAMENTO DE USUÁRIOS
 with aba_usuarios:
     st.subheader("👥 Gerenciamento de Usuários do Sistema")
     
@@ -388,10 +413,10 @@ with aba_usuarios:
                                 (novo_username, hash_password(nova_senha), novo_nome)
                             )
                             conn.commit()
-                        st.success(f"Usuário '{novo_username}' cadastrado com sucesso!")
+                        st.success(f"Usuário '{novo_username}' cadastrado!")
                         st.rerun()
                     except sqlite3.IntegrityError:
-                        st.error("Erro: Este nome de usuário já existe no sistema!")
+                        st.error("Erro: Nome de usuário já existe!")
                 else:
                     st.error("Preencha todos os campos obrigatórios.")
 
@@ -412,7 +437,7 @@ with aba_usuarios:
             if user_to_delete == "admin":
                 st.error("O usuário 'admin' principal não pode ser excluído!")
             elif user_to_delete == st.session_state["usuario_login"]:
-                st.error("Você não pode excluir seu próprio usuário enquanto está logado!")
+                st.error("Você não pode excluir seu próprio usuário atual!")
             else:
                 with get_connection() as conn:
                     cursor = conn.cursor()
