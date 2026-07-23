@@ -1,234 +1,239 @@
 import sqlite3
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 import io
 
-# Configuração da página do Streamlit
+# 1. Configuração Inicial da Página
 st.set_page_config(
-    page_title="Sistema de Controle de Torres",
+    page_title="Gestão Integrada de Torres",
     page_icon="🏗️",
     layout="wide"
 )
 
-# --- BANCO DE DADOS ---
+# Estilo visual customizado
+st.markdown("""
+    <style>
+    .stApp { background-color: #f8f9fa; }
+    .kanban-card {
+        background-color: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 10px;
+        border-left: 4px solid #1f538d;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# 2. Conexão e Banco de Dados
+def get_connection():
+    return sqlite3.connect("gestao_torres.db", check_same_thread=False)
+
 def init_db():
-    try:
-        with sqlite3.connect("gestao_torres.db", timeout=10.0) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS torres (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    acionamento TEXT,
-                    projeto TEXT,
-                    revisao TEXT DEFAULT '00',
-                    tipo TEXT DEFAULT 'Torre',
-                    finalidade TEXT DEFAULT 'Fabricação',
-                    peso REAL,
-                    site_1 TEXT,
-                    site_2 TEXT,
-                    num_serie TEXT,
-                    local TEXT,
-                    elemento TEXT,
-                    cliente TEXT,
-                    responsavel TEXT,
-                    data TEXT,
-                    prazo TEXT,
-                    status_projeto TEXT DEFAULT 'Em andamento',
-                    status_steel TEXT DEFAULT 'A fazer',
-                    status_sankhya TEXT DEFAULT 'A fazer',
-                    inicio_andamento_proj TEXT,
-                    fim_andamento_proj TEXT,
-                    inicio_andamento_steel TEXT,
-                    fim_andamento_steel TEXT,
-                    inicio_andamento_sank TEXT,
-                    fim_andamento_sank TEXT
-                )
-            ''')
-            
-            # Garantir colunas essenciais caso o banco seja antigo
-            for col, tipo_col in [
-                ("prazo", "TEXT"), ("tipo", "TEXT DEFAULT 'Torre'"), 
-                ("revisao", "TEXT DEFAULT '00'"), ("finalidade", "TEXT DEFAULT 'Fabricação'")
-            ]:
-                try:
-                    cursor.execute(f"ALTER TABLE torres ADD COLUMN {col} {tipo_col}")
-                except sqlite3.OperationalError:
-                    pass
-            conn.commit()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao inicializar o banco de dados: {e}")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS torres (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                acionamento TEXT,
+                projeto TEXT,
+                revisao TEXT DEFAULT '00',
+                tipo TEXT DEFAULT 'Torre',
+                finalidade TEXT DEFAULT 'Fabricação',
+                peso REAL DEFAULT 0.0,
+                site_1 TEXT,
+                site_2 TEXT,
+                num_serie TEXT,
+                local TEXT,
+                elemento TEXT,
+                cliente TEXT,
+                responsavel TEXT,
+                data TEXT,
+                prazo TEXT,
+                status_projeto TEXT DEFAULT 'A fazer',
+                inicio_andamento_proj TEXT,
+                fim_andamento_proj TEXT
+            )
+        ''')
+        conn.commit()
 
 init_db()
 
-# Função para carregar dados do banco em um DataFrame pandas
-def carregar_dados_df():
-    try:
-        with sqlite3.connect("gestao_torres.db", timeout=10.0) as conn:
-            df = pd.read_sql("SELECT * FROM torres", conn)
-            return df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return pd.DataFrame()
+# Função para atualizar status rapidamente via Kanban
+def atualizar_status(torre_id, novo_status):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if novo_status == "Em andamento":
+            cursor.execute("UPDATE torres SET status_projeto=?, inicio_andamento_proj=? WHERE id=?", (novo_status, agora, torre_id))
+        elif novo_status == "Concluído":
+            cursor.execute("UPDATE torres SET status_projeto=?, fim_andamento_proj=? WHERE id=?", (novo_status, agora, torre_id))
+        else:
+            cursor.execute("UPDATE torres SET status_projeto=? WHERE id=?", (novo_status, torre_id))
+        conn.commit()
+    st.cache_data.clear()
 
-# --- INTERFACE PRINCIPAL (STREAMLIT) ---
-st.title("🏗️ Sistema de Controle de Torres")
+# Leitura com Cache para Alta Performance
+@st.cache_data(ttl=5)
+def carregar_dados():
+    with get_connection() as conn:
+        return pd.read_sql("SELECT * FROM torres", conn)
 
-# Abas do sistema
-aba_cadastro, aba_kanban, aba_indicadores, aba_cancelados = st.tabs([
-    "📋 Cadastro e Informações", 
-    "📊 Acompanhamento (Kanban)", 
-    "📈 Indicadores (Dashboards)", 
+df_global = carregar_dados()
+
+# --- BARRA SUPERIOR E AÇÕES ---
+st.title("🏗️ Sistema Integrado de Controle de Torres")
+
+col_top1, col_top2 = st.columns([6, 2])
+
+with col_top2:
+    with st.popover("➕ Cadastrar Nova Torre", use_container_width=True):
+        st.subheader("Novo Cadastro")
+        with st.form("form_nova_torre", clear_on_submit=True):
+            f_acionamento = st.text_input("Acionamento *")
+            f_projeto = st.text_input("Projeto *")
+            f_cliente = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"])
+            f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+            f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+            f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
+            f_responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
+            f_prazo = st.date_input("Prazo de Entrega", value=datetime.now() + timedelta(days=7))
+
+            if st.form_submit_button("Salvar Registro"):
+                if f_acionamento and f_projeto:
+                    with get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO torres (acionamento, projeto, cliente, tipo, finalidade, peso, responsavel, prazo, data, status_projeto)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'A fazer')
+                        ''', (f_acionamento, f_projeto, f_cliente, f_tipo, f_finalidade, f_peso, f_responsavel, f_prazo.strftime("%d/%m/%Y"), datetime.now().strftime("%d/%m/%Y")))
+                        conn.commit()
+                    st.cache_data.clear()
+                    st.success("Torre cadastrada!")
+                    st.rerun()
+                else:
+                    st.error("Campos obrigatórios faltando.")
+
+# --- NAVEGAÇÃO DE ABAS ---
+aba_lista, aba_kanban, aba_dash, aba_cancelados = st.tabs([
+    "📋 Listagem e Filtros", 
+    "📊 Kanban Interativo", 
+    "📈 Dashboards", 
     "🚫 Cancelados"
 ])
 
-df_global = carregar_dados_df()
-
 # =========================================================================
-# ABA 1: CADASTRO E INFORMAÇÕES
+# ABA 1: LISTA E BUSCA
 # =========================================================================
-with aba_cadastro:
-    st.subheader("Gerenciamento de Torres e Projetos")
-    
-    col_btn1, col_btn2 = st.columns([2, 8])
-    with col_btn1:
-        if st.button("➕ Cadastrar Nova Torre", use_container_width=True):
-            st.session_state["modal_cadastro"] = True
+with aba_lista:
+    st.subheader("Filtros de Pesquisa")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        busca_texto = st.text_input("🔎 Buscar por palavra-chave")
+    with c2:
+        filtro_cliente = st.multiselect("Cliente", options=df_global["cliente"].unique() if not df_global.empty else [])
+    with c3:
+        filtro_status = st.multiselect("Status", options=df_global["status_projeto"].unique() if not df_global.empty else [])
 
-    # Modal / Formulário de Cadastro
-    if st.session_state.get("modal_cadastro", False):
-        with st.form("form_cadastro"):
-            st.write("### Preencha os dados da Torre")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                acionamento = st.text_input("Acionamento *")
-                projeto = st.text_input("Projeto *")
-                revisao = st.text_input("Revisão", value="00")
-                tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
-                finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
-            with c2:
-                peso = st.text_input("Peso (kg)", value="0")
-                site_1 = st.text_input("Site I")
-                site_2 = st.text_input("Site II")
-                num_serie = st.text_input("Nº de Série")
-                local = st.text_input("Local")
-            with c3:
-                elemento = st.text_input("Elemento")
-                cliente = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"])
-                responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
-                data_cad = st.text_input("Data", value=datetime.now().strftime("%d/%m/%Y"))
-                prazo_cad = st.text_input("Prazo", value=(datetime.now() + timedelta(days=5)).strftime("%d/%m/%Y"))
+    df_view = df_global.copy()
+    if busca_texto and not df_view.empty:
+        df_view = df_view[df_view.astype(str).apply(lambda row: row.str.contains(busca_texto, case=False).any(), axis=1)]
+    if filtro_cliente and not df_view.empty:
+        df_view = df_view[df_view["cliente"].isin(filtro_cliente)]
+    if filtro_status and not df_view.empty:
+        df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
 
-            submitted = st.form_submit_button("Salvar Cadastro")
-            if submitted:
-                if not acionamento or not projeto:
-                    st.warning("Os campos 'Acionamento' e 'Projeto' são obrigatórios!")
-                else:
-                    try:
-                        peso_val = float(peso.replace(',', '.'))
-                        with sqlite3.connect("gestao_torres.db", timeout=10.0) as conn:
-                            cursor = conn.cursor()
-                            agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            cursor.execute('''
-                                INSERT INTO torres (
-                                    acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, 
-                                    num_serie, local, elemento, cliente, responsavel, data, prazo,
-                                    status_projeto, inicio_andamento_proj
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em andamento', ?)
-                            ''', (acionamento, projeto, revisao, tipo, finalidade, peso_val, site_1, site_2, 
-                                  num_serie, local, elemento, cliente, responsavel, data_cad, prazo_cad, agora))
-                            conn.commit()
-                        st.success("Torre cadastrada com sucesso!")
-                        st.session_state["modal_cadastro"] = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao salvar: {e}")
-
-    st.divider()
-
-    # Filtros de Busca
-    f_col1, f_col2, f_col3 = st.columns(3)
-    with f_col1:
-        busca = st.text_input("🔍 Pesquisa rápida", placeholder="Digite para buscar...")
-    with f_col2:
-        tipos_disponiveis = ["Todos"] + list(df_global["tipo"].dropna().unique()) if not df_global.empty else ["Todos"]
-        filtro_tipo = st.selectbox("Filtrar por Tipo", tipos_disponiveis)
-    with f_col3:
-        status_disponiveis = ["Todos", "Em andamento", "Concluído", "Cancelado"]
-        filtro_status = st.selectbox("Filtrar por Status", status_disponiveis)
-
-    # Filtragem do DataFrame
-    df_filtrado = df_global.copy()
-    if not df_filtrado.empty:
-        if busca:
-            df_filtrado = df_filtrado[df_filtrado.astype(str).apply(lambda x: x.str.contains(busca, case=False)).any(axis=1)]
-        if filtro_tipo != "Todos":
-            df_filtrado = df_filtrado[df_filtrado["tipo"] == filtro_tipo]
-        if filtro_status != "Todos":
-            df_filtrado = df_filtrado[df_filtrado["status_projeto"] == filtro_status]
-
-    st.subheader("⏳ Projetos em Andamento / A Fazer")
-    if not df_filtrado.empty:
-        df_andamento = df_filtrado[df_filtrado["status_projeto"] != "Cancelado"]
-        st.dataframe(df_andamento, use_container_width=True)
+    st.subheader("Registros Encontrados")
+    if not df_view.empty:
+        st.dataframe(df_view, use_container_width=True, hide_index=True)
+        
+        # Gerar Excel para download
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_view.to_excel(writer, index=False, sheet_name='Torres')
+        
+        st.download_button(
+            label="📥 Baixar Relatório em Excel",
+            data=buffer.getvalue(),
+            file_name=f"relatorio_torres_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
-        st.info("Nenhum registro encontrado.")
+        st.info("Nenhum registro encontrado com os filtros aplicados.")
 
 # =========================================================================
-# ABA 2: KANBAN
+# ABA 2: KANBAN INTERATIVO
 # =========================================================================
 with aba_kanban:
-    st.subheader("📊 Acompanhamento de Projetos (Kanban)")
-    st.markdown("*Apenas projetos com finalidade 'Fabricação' e ativos aparecem aqui.*")
+    st.subheader("Acompanhamento do Fluxo de Produção")
     
-    if not df_global.empty:
-        fab_df = df_global[(df_global["finalidade"] == "Fabricação") & (df_global["status_projeto"] != "Cancelado")]
-        
-        col_k1, col_k2, col_k3 = st.columns(3)
-        with col_k1:
-            st.markdown("### 📌 A Fazer")
-            a_fazer = fab_df[fab_df["status_projeto"] == "A fazer"]
-            for _, row in a_fazer.iterrows():
-                st.info(f"**ID {row['id']}** - {row['projeto']}\n\nCliente: {row['cliente']}")
-        with col_k2:
-            st.markdown("### ⏳ Em Andamento")
-            em_and = fab_df[fab_df["status_projeto"] == "Em andamento"]
-            for _, row in em_and.iterrows():
-                st.warning(f"**ID {row['id']}** - {row['projeto']}\n\nCliente: {row['cliente']}")
-        with col_k3:
-            st.markdown("### ✅ Concluído")
-            concl = fab_df[fab_df["status_projeto"] == "Concluído"]
-            for _, row in concl.iterrows():
-                st.success(f"**ID {row['id']}** - {row['projeto']}\n\nCliente: {row['cliente']}")
+    col_a_fazer, col_em_andamento, col_concluido = st.columns(3)
+    
+    statuses = ["A fazer", "Em andamento", "Concluído"]
+    cols = [col_a_fazer, col_em_andamento, col_concluido]
+    icones = ["📌 A Fazer", "⏳ Em Andamento", "✅ Concluído"]
+
+    for idx, status in enumerate(statuses):
+        with cols[idx]:
+            st.markdown(f"### {icones[idx]}")
+            items = df_global[df_global["status_projeto"] == status]
+            
+            for _, item in items.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**#{item['id']} - {item['projeto']}**")
+                    st.caption(f"Cliente: {item['cliente']} | Peso: {item['peso']} kg")
+                    st.caption(f"Prazo: {item['prazo']}")
+                    
+                    # Botões de movimentação rápida
+                    btn_c1, btn_c2 = st.columns(2)
+                    if status == "A fazer":
+                        if btn_c1.button("Mover ➔", key=f"and_{item['id']}"):
+                            atualizar_status(item['id'], "Em andamento")
+                            st.rerun()
+                    elif status == "Em andamento":
+                        if btn_c1.button("◀ Voltar", key=f"faz_{item['id']}"):
+                            atualizar_status(item['id'], "A fazer")
+                            st.rerun()
+                        if btn_c2.button("Concluir ✅", key=f"con_{item['id']}"):
+                            atualizar_status(item['id'], "Concluído")
+                            st.rerun()
 
 # =========================================================================
-# ABA 3: INDICADORES
+# ABA 3: DASHBOARDS INTERATIVOS (PLOTLY)
 # =========================================================================
-with aba_indicadores:
-    st.subheader("📈 Indicadores e Dashboards")
+with aba_dash:
+    st.subheader("Visão Geral do Desempenho")
     if not df_global.empty:
-        c_ind1, c_ind2 = st.columns(2)
-        with c_ind1:
-            st.write("#### Quantidade de Torres por Cliente")
-            fig, ax = plt.subplots(figsize=(6, 4))
-            df_global["cliente"].value_counts().plot(kind="bar", ax=ax, color="#1f538d")
-            plt.xticks(rotation=45)
-            st.pyplot(fig)
-        with c_ind2:
-            st.write("#### Status dos Projetos")
-            fig2, ax2 = plt.subplots(figsize=(6, 4))
-            df_global["status_projeto"].value_counts().plot(kind="pie", ax=ax2, autopct='%1.1f%%')
-            st.pyplot(fig2)
+        d_col1, d_col2 = st.columns(2)
+        
+        with d_col1:
+            fig_bar = px.bar(
+                df_global['cliente'].value_counts().reset_index(),
+                x='cliente', y='count',
+                title="Torres por Cliente",
+                labels={'cliente': 'Cliente', 'count': 'Quantidade'},
+                color_discrete_sequence=['#1f538d']
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+        with d_col2:
+            fig_pie = px.pie(
+                df_global, names='status_projeto',
+                title="Distribuição de Status de Projetos",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
 
 # =========================================================================
 # ABA 4: CANCELADOS
 # =========================================================================
 with aba_cancelados:
-    st.subheader("🚫 Torres Canceladas")
-    if not df_global.empty:
-        df_canc = df_global[df_global["status_projeto"] == "Cancelado"]
-        if not df_canc.empty:
-            st.dataframe(df_canc, use_container_width=True)
-        else:
-            st.info("Nenhuma torre cancelada.")
+    st.subheader("🚫 Projetos Cancelados ou Interrompidos")
+    df_canc = df_global[df_global["status_projeto"] == "Cancelado"]
+    if not df_canc.empty:
+        st.dataframe(df_canc, use_container_width=True)
+    else:
+        st.info("Nenhum projeto cancelado registrado.")
