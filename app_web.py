@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado - Modo Escuro Slate Dark (Trello Style)
+# 2. CSS Customizado - Modo Escuro Slate Dark Compacto
 st.markdown("""
     <style>
     /* Fundo Geral da Aplicação */
@@ -81,17 +81,16 @@ st.markdown("""
         border: none !important;
         border-radius: 6px !important;
         font-weight: 600 !important;
+        padding: 4px 8px !important;
+        font-size: 13px !important;
     }
     .stButton > button:hover, div[data-testid="stPopover"] > button:hover {
         background-color: #1d4ed8 !important;
     }
 
-    /* Containers do Formulário */
-    div[data-testid="stForm"] {
-        background-color: #1e293b !important;
-        border: 1px solid #334155 !important;
-        border-radius: 8px !important;
-        padding: 20px !important;
+    /* Cards do Kanban mais compactos */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
+        padding: 2px !important;
     }
 
     /* Dataframe / Tabelas */
@@ -163,7 +162,6 @@ def init_db():
             )
         ''')
         
-        # Migração dinâmica de colunas
         cols_novas = [
             ("revisao", "TEXT DEFAULT '00'"),
             ("site_1", "TEXT DEFAULT ''"),
@@ -190,7 +188,6 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # Admin padrão
         cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
         if not cursor.fetchone():
             cursor.execute(
@@ -201,7 +198,7 @@ def init_db():
 
 init_db()
 
-# --- FUNÇÕES UTILITÁRIAS DE TEMPO E AÇÕES ---
+# --- FUNÇÕES UTILITÁRIAS ---
 def formatar_segundos(segundos):
     if not segundos or segundos <= 0:
         return "00:00:00"
@@ -423,7 +420,7 @@ aba_lista, aba_kanban, aba_dash, aba_cancelados, aba_usuarios = st.tabs([
     "👥 Usuários"
 ])
 
-# 1. LISTA COM CONTROLE DE TEMPO DETALHADO, COLUNAS RESTAURADAS E AÇÕES
+# 1. LISTAGEM
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
     c1, c2, c3 = st.columns(3)
@@ -443,7 +440,6 @@ with aba_lista:
         df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
 
     if not df_view.empty:
-        # Montagem de todas as colunas correspondentes à imagem do usuário
         df_view['ID'] = df_view['id']
         df_view['Acionamento'] = df_view['acionamento']
         df_view['Projeto'] = df_view['projeto']
@@ -462,7 +458,6 @@ with aba_lista:
         df_view['Prazo'] = df_view['prazo']
         df_view['Etapa'] = df_view['status_projeto']
         
-        # Cálculos de Progresso e Status
         df_view['Progresso (%)'] = df_view['status_projeto'].map({
             'Projeto': '25%', 'Steel': '50%', 'Sankhya': '75%', 'Concluído': '100%', 'Cancelado': '0%'
         }).fillna('0%')
@@ -496,7 +491,7 @@ with aba_lista:
 
         st.divider()
 
-        # PAINEL DE AÇÕES (EDITAR / EXCLUIR NA LISTAGEM)
+        # PAINEL DE AÇÕES
         st.subheader("⚡ Ações na Listagem (Editar / Excluir Registros)")
         col_sel, col_act1, col_act2 = st.columns([3, 1, 1])
 
@@ -554,70 +549,102 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS
+# 2. KANBAN MULTI-ETAPAS COMPACTO E COM FILTROS
 with aba_kanban:
-    st.subheader("Acompanhamento e Controle de Tempo por Etapa")
+    st.subheader("📊 Kanban Multi-Etapas")
     
-    etapas_ordem = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
-    icones = ["📐 Projeto", "⚙️ Steel", "🏢 Sankhya", "✅ Concluído", "🚫 Cancelado"]
-    
-    cols = st.columns(5)
+    # --- FILTROS DO KANBAN ---
+    with st.expander("🔍 Filtros do Kanban", expanded=True):
+        fk_c1, fk_c2 = st.columns([2, 2])
+        with fk_c1:
+            busca_kanban = st.text_input(
+                "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I):", 
+                placeholder="Digite para buscar...",
+                key="busca_kanban_input"
+            )
+        with fk_c2:
+            etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
+            etapas_selecionadas = st.multiselect(
+                " Exibir Etapas:", 
+                options=etapas_todas,
+                default=etapas_todas,
+                key="etapas_kanban_multiselect"
+            )
 
-    for idx, etapa_coluna in enumerate(etapas_ordem):
-        with cols[idx]:
-            st.markdown(f"### {icones[idx]}")
-            
-            for _, item in df_global.iterrows():
-                id_item = item['id']
-                etapa_atual = item['status_projeto']
-                etapa_key = etapa_coluna.lower()
-                is_etapa_ativa = (etapa_coluna == etapa_atual)
+    # Filtragem dos dados do Kanban
+    df_kanban = df_global.copy()
+    if busca_kanban:
+        b_term = busca_kanban.lower()
+        df_kanban = df_kanban[
+            df_kanban['projeto'].astype(str).str.lower().str.contains(b_term) |
+            df_kanban['acionamento'].astype(str).str.lower().str.contains(b_term) |
+            df_kanban['num_serie'].fillna('').astype(str).str.lower().str.contains(b_term) |
+            df_kanban['site_1'].fillna('').astype(str).str.lower().str.contains(b_term)
+        ]
+
+    etapas_exibir = [e for e in etapas_todas if e in etapas_selecionadas] if etapas_selecionadas else etapas_todas
+    icones_map = {
+        "Projeto": "📐 Projeto",
+        "Steel": "⚙️ Steel",
+        "Sankhya": "🏢 Sankhya",
+        "Concluído": "✅ Concluído",
+        "Cancelado": "🚫 Cancelado"
+    }
+
+    if etapas_exibir:
+        cols_k = st.columns(len(etapas_exibir))
+
+        for idx, etapa_coluna in enumerate(etapas_exibir):
+            with cols_k[idx]:
+                st.markdown(f"#### {icones_map[etapa_coluna]}")
                 
-                with st.container(border=True):
-                    st.markdown(f"**#{id_item} - {item['projeto']}**")
-                    st.caption(f"**Cliente:** {item['cliente']} | **Prazo:** {item['prazo']}")
+                # Registros pertencentes à etapa atual
+                df_etapa = df_kanban[df_kanban['status_projeto'] == etapa_coluna]
+                
+                if df_etapa.empty:
+                    st.caption("*(Vazio)*")
+                
+                for _, item in df_etapa.iterrows():
+                    id_item = item['id']
+                    etapa_atual = item['status_projeto']
+                    etapa_key = etapa_coluna.lower()
                     
-                    segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key) if etapa_key in ['projeto', 'steel', 'sankhya'] else 0
-                    tempo_str = formatar_segundos(segundos_etapa)
-                    
-                    if is_etapa_ativa:
+                    with st.container(border=True):
+                        st.markdown(f"**#{id_item} - {item['projeto']}**")
+                        st.caption(f"⚡ **Acion.:** {item['acionamento']} | 🏢 **Cli:** {item['cliente']}")
+                        
+                        site1_val = item['site_1'] if item['site_1'] else "-"
+                        num_serie_val = item['num_serie'] if item['num_serie'] else "-"
+                        st.caption(f"📍 **Site I:** {site1_val} | 🔢 **Nº Série:** {num_serie_val}")
+                        
+                        segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key) if etapa_key in ['projeto', 'steel', 'sankhya'] else 0
+                        tempo_str = formatar_segundos(segundos_etapa)
+                        
                         if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
-                            st.markdown(f"⏱️ **Tempo na Etapa:** `{tempo_str}`")
-                            if item['estado_relogio'] == 'rodando':
-                                st.caption("🟢 **Em Execução**")
-                            else:
-                                st.caption("🔴 **Pausado/Aguardando**")
+                            st.markdown(f"⏱️ `{tempo_str}` " + ("🟢" if item['estado_relogio'] == 'rodando' else "🔴"))
 
-                            proxima_etapa = etapas_ordem[etapas_ordem.index(etapa_coluna) + 1]
+                            proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
                             c_btn1, c_btn2 = st.columns(2)
                             with c_btn1:
                                 if item['estado_relogio'] == 'parado':
-                                    if st.button("▶️ Iniciar", key=f"start_{id_item}_{etapa_key}"):
+                                    if st.button("▶️ Iniciar", key=f"k_start_{id_item}"):
                                         acao_iniciar_relogio(id_item, etapa_key)
                                         st.rerun()
                                 else:
-                                    if st.button("⏸️ Pausar", key=f"pause_{id_item}_{etapa_key}"):
+                                    if st.button("⏸️ Pausar", key=f"k_pause_{id_item}"):
                                         acao_pausar_relogio(id_item, etapa_key)
                                         st.rerun()
                             
                             with c_btn2:
-                                if st.button("✅ Finalizar", key=f"fin_{id_item}_{etapa_key}"):
+                                if st.button("✅ Avançar", key=f"k_fin_{id_item}"):
                                     acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
                                     st.rerun()
-
-                            if st.button("🚫 Cancelar Projeto", key=f"canc_{id_item}_{etapa_key}", use_container_width=True):
-                                acao_finalizar_etapa(id_item, etapa_coluna, "Cancelado")
-                                st.rerun()
-                        elif etapa_coluna == "Concluído":
-                            st.success("✅ Projeto Concluído")
-                        elif etapa_coluna == "Cancelado":
-                            st.error("🚫 Projeto Cancelado")
 
                         c_ed1, c_ed2 = st.columns(2)
                         with c_ed1:
                             with st.popover("✏️ Editar", use_container_width=True):
-                                with st.form(key=f"edit_form_{id_item}"):
+                                with st.form(key=f"k_edit_form_{id_item}"):
                                     e_ac = st.text_input("Acionamento", value=item['acionamento'])
                                     e_proj = st.text_input("Projeto", value=item['projeto'])
                                     e_rev = st.text_input("Revisão", value=item['revisao'] or '00')
@@ -639,24 +666,16 @@ with aba_kanban:
 
                         with c_ed2:
                             with st.popover("🗑️ Excluir", use_container_width=True):
-                                st.write("Confirmar exclusão?")
-                                if st.button("Sim, Excluir", key=f"del_{id_item}"):
+                                st.write("Excluir registro?")
+                                if st.button("Sim", key=f"k_del_{id_item}"):
                                     excluir_torre(id_item)
                                     st.rerun()
+    else:
+        st.info("Nenhuma etapa selecionada para exibição.")
 
-                    else:
-                        idx_etapa_coluna = etapas_ordem.index(etapa_coluna)
-                        idx_etapa_atual = etapas_ordem.index(etapa_atual) if etapa_atual in etapas_ordem else -1
-                        
-                        if idx_etapa_coluna < idx_etapa_atual:
-                            st.success(f"✓ Concluído ({tempo_str})")
-                        else:
-                            st.caption("🔒 *Aguardando etapa anterior*")
-
-# 3. DASHBOARDS COMPLETO COM NOVOS GRÁFICOS E FILTROS
+# 3. DASHBOARDS
 with aba_dash:
     st.subheader("📈 Dashboard de Desempenho e Indicadores")
-    
     if not df_global.empty:
         with st.expander("🔍 Filtros do Dashboard", expanded=True):
             col_f1, col_f2, col_f3 = st.columns(3)
