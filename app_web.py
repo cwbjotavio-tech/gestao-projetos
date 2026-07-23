@@ -20,12 +20,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado - Modo Escuro Slate Dark Otimizado e Compacto
+# 2. CSS Customizado - Ajustado para o Título Principal ficar 100% visível
 st.markdown("""
     <style>
-    /* Otimização de Espaço do Topo e Margens da Página */
+    /* Otimização de Espaço do Topo com margem suficiente para o Título Principal */
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 2.5rem !important;
         padding-bottom: 1rem !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
@@ -39,11 +39,11 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Redução de Margens de Títulos */
+    /* Ajuste de Posição do Título H1 ("Controle de Torres") */
     h1 {
-        font-size: 1.75rem !important;
-        margin-top: 0px !important;
-        margin-bottom: 0px !important;
+        font-size: 1.8rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
         padding-top: 0px !important;
         font-weight: 700 !important;
     }
@@ -692,8 +692,6 @@ with aba_lista:
 
 # 2. KANBAN MULTI-ETAPAS
 with aba_kanban:
-    # Espaçamento para abaixar levemente o título
-    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
     st.subheader("📊 Kanban Multi-Etapas")
     
     with st.expander("🔍 Filtros do Kanban", expanded=True):
@@ -752,7 +750,6 @@ with aba_kanban:
                     with st.container(border=True):
                         c_card_h1, c_card_h2 = st.columns([4, 1])
                         with c_card_h1:
-                            # FONTE AUMENTADA: Título do card (15px)
                             st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
@@ -787,7 +784,6 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        # FONTE AUMENTADA: Detalhes do card (13px)
                         st.markdown(f"""
                         <div style="font-size: 13px; line-height: 1.4; color: #cbd5e1; margin-top: 4px; margin-bottom: 6px;">
                             ⚡ <b>Acion:</b> {item['acionamento']} | 🏢 <b>Cli:</b> {item['cliente']}<br>
@@ -800,7 +796,6 @@ with aba_kanban:
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            # FONTE AUMENTADA: Cronômetro (12px)
                             st.markdown(f"<div style='font-size:13px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
@@ -828,11 +823,10 @@ with aba_kanban:
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
 
-# 3. DASHBOARDS (FOCO EM QUANTIDADE E TEMPO - SEM PESO)
+# 3. DASHBOARDS
 with aba_dash:
     st.subheader("📈 Dashboard de Quantidades, Tempos e Desempenho")
     if not df_global.empty:
-        # Tratamento de datas para o filtro de Ano e Mês
         df_dash_base = df_global.copy()
         df_dash_base['data_dt'] = pd.to_datetime(df_dash_base['data'], format='%d/%m/%Y', errors='coerce')
         df_dash_base['ano'] = df_dash_base['data_dt'].dt.year
@@ -864,7 +858,6 @@ with aba_dash:
         if not df_dash.empty:
             df_dash['situacao_filtro'] = df_dash['status_projeto'].apply(classificar_situacao)
 
-        # Aplicando os filtros selecionados
         if dash_anos:
             df_dash = df_dash[df_dash['ano'].isin(dash_anos)]
         if dash_meses:
@@ -879,7 +872,6 @@ with aba_dash:
             df_dash = df_dash[df_dash['situacao_filtro'].isin(dash_situacao)]
 
         if not df_dash.empty:
-            # Cálculo de Tempo Total Acumulado em Horas
             tempo_total_sec = (
                 df_dash['tempo_projeto_sec'].fillna(0) +
                 df_dash['tempo_steel_sec'].fillna(0) +
@@ -887,7 +879,6 @@ with aba_dash:
             ).sum()
             horas_totais = tempo_total_sec / 3600
 
-            # MÉTRICAS FOCADAS EM QUANTIDADE E TEMPO
             m1, m2, m3, m4 = st.columns(4)
             with m1:
                 st.metric("Total de Projetos", len(df_dash))
@@ -900,7 +891,6 @@ with aba_dash:
 
             st.divider()
 
-            # LINHA 1 DE GRÁFICOS
             g1, g2 = st.columns(2)
 
             with g1:
@@ -944,11 +934,9 @@ with aba_dash:
 
             st.divider()
 
-            # LINHA 2 DE GRÁFICOS (Evolução Temporal & Tempo por Responsável)
             g3, g4 = st.columns(2)
 
             with g3:
-                # Evolução mensal de novos cadastros
                 df_ev = df_dash.dropna(subset=['ano', 'mes_num']).groupby(['ano', 'mes_num', 'mes_nome']).size().reset_index(name='qtd')
                 df_ev['ano'] = df_ev['ano'].astype(int)
                 df_ev = df_ev.sort_values(by=['ano', 'mes_num'])
@@ -969,7 +957,6 @@ with aba_dash:
                     st.info("Sem dados temporais suficientes para exibir a evolução mensal.")
 
             with g4:
-                # Total de Horas por Responsável
                 df_dash['total_horas_item'] = (
                     df_dash['tempo_projeto_sec'].fillna(0) +
                     df_dash['tempo_steel_sec'].fillna(0) +
