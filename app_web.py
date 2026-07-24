@@ -344,6 +344,30 @@ def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
         conn.commit()
     st.cache_data.clear()
 
+def acao_retroceder_etapa(torre_id, etapa_atual):
+    anterior_map = {
+        "Steel": "Projeto",
+        "Sankhya": "Steel",
+        "Concluído": "Sankhya",
+        "Cancelado": "Sankhya"
+    }
+    if etapa_atual not in anterior_map:
+        return
+    etapa_anterior = anterior_map[etapa_atual]
+    etapa_anterior_key = etapa_anterior.lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'''
+            UPDATE torres SET 
+                status_projeto=?, 
+                fim_{etapa_anterior_key}='',
+                estado_relogio='parado',
+                timestamp_ultimo_inicio=''
+            WHERE id=?
+        ''', (etapa_anterior, torre_id))
+        conn.commit()
+    st.cache_data.clear()
+
 def acao_cancelar_projeto(torre_id, etapa_atual):
     etapa_key = etapa_atual.lower() if etapa_atual.lower() in ['projeto', 'steel', 'sankhya'] else 'projeto'
     now_br = agora_br()
@@ -874,26 +898,60 @@ with aba_kanban:
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
-                            c_btn1, c_btn2, c_btn3 = st.columns(3)
-                            with c_btn1:
-                                if item['estado_relogio'] == 'parado':
-                                    if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar Temporizador", use_container_width=True):
-                                        acao_iniciar_relogio(id_item, etapa_key)
+                            if etapa_coluna == "Projeto":
+                                c_btn1, c_btn2, c_btn3 = st.columns(3)
+                                with c_btn1:
+                                    if item['estado_relogio'] == 'parado':
+                                        if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar Temporizador", use_container_width=True):
+                                            acao_iniciar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                    else:
+                                        if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar Temporizador", use_container_width=True):
+                                            acao_pausar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                with c_btn2:
+                                    if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
+                                        acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
                                         st.rerun()
-                                else:
-                                    if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar Temporizador", use_container_width=True):
-                                        acao_pausar_relogio(id_item, etapa_key)
+                                with c_btn3:
+                                    if st.button("🚫", key=f"k_canc_{id_item}", help="Cancelar Projeto", use_container_width=True):
+                                        acao_cancelar_projeto(id_item, etapa_coluna)
                                         st.rerun()
-                            
-                            with c_btn2:
-                                if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
-                                    acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
-                                    st.rerun()
+                            else:
+                                c_btn_back, c_btn1, c_btn2, c_btn3 = st.columns(4)
+                                with c_btn_back:
+                                    if st.button("◀️", key=f"k_back_{id_item}", help="Retornar à etapa anterior", use_container_width=True):
+                                        acao_retroceder_etapa(id_item, etapa_coluna)
+                                        st.rerun()
+                                with c_btn1:
+                                    if item['estado_relogio'] == 'parado':
+                                        if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar Temporizador", use_container_width=True):
+                                            acao_iniciar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                    else:
+                                        if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar Temporizador", use_container_width=True):
+                                            acao_pausar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                with c_btn2:
+                                    if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
+                                        acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
+                                        st.rerun()
+                                with c_btn3:
+                                    if st.button("🚫", key=f"k_canc_{id_item}", help="Cancelar Projeto", use_container_width=True):
+                                        acao_cancelar_projeto(id_item, etapa_coluna)
+                                        st.rerun()
 
-                            with c_btn3:
-                                if st.button("🚫", key=f"k_canc_{id_item}", help="Cancelar Projeto", use_container_width=True):
-                                    acao_cancelar_projeto(id_item, etapa_coluna)
-                                    st.rerun()
+                        elif etapa_coluna == "Concluído":
+                            st.write("")
+                            if st.button("◀️ Retornar Etapa Anterior", key=f"k_back_conc_{id_item}", use_container_width=True):
+                                acao_retroceder_etapa(id_item, etapa_coluna)
+                                st.rerun()
+
+                        elif etapa_coluna == "Cancelado":
+                            st.write("")
+                            if st.button("◀️ Reativar / Retornar Etapa", key=f"k_back_canc_{id_item}", use_container_width=True):
+                                acao_retroceder_etapa(id_item, etapa_coluna)
+                                st.rerun()
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
 
