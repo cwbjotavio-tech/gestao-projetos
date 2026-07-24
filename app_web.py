@@ -218,6 +218,12 @@ def obter_locais_cadastrados():
         cursor.execute("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local")
         return [row[0] for row in cursor.fetchall()]
 
+def obter_elementos_cadastrados():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT elemento FROM torres WHERE elemento IS NOT NULL AND elemento != '' ORDER BY elemento")
+        return [row[0] for row in cursor.fetchall()]
+
 def obter_clientes():
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -502,47 +508,54 @@ with col_b1:
             except Exception as e:
                 st.error(f"Erro ao importar: {e}")
 
-# --- CADASTRO EM DUAS COLUNAS ---
+# --- CADASTRO EM TRÊS COLUNAS ---
 with col_b2:
     with st.popover("➕ Cadastrar Projeto", use_container_width=True):
         st.subheader("Novo Cadastro")
         locais_cadastrados = obter_locais_cadastrados()
+        elementos_cadastrados = obter_elementos_cadastrados()
         lista_clientes = obter_clientes()
         lista_responsaveis = obter_responsaveis()
         
         with st.form("form_nova_torre", clear_on_submit=True):
-            col_fc1, col_fc2 = st.columns(2)
+            col_fc1, col_fc2, col_fc3 = st.columns(3)
             with col_fc1:
                 f_acionamento = st.text_input("Acionamento *")
                 f_projeto = st.text_input("Projeto *")
                 f_revisao = st.text_input("Revisão", value="00")
                 f_cliente = st.selectbox("Cliente", options=lista_clientes if lista_clientes else ["BTC"])
                 f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
-                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
-                f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
-                f_data_cad = st.date_input("Data de Cadastro", value=agora_br().date())
 
             with col_fc2:
+                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
                 f_site1 = st.text_input("Site I")
                 f_site2 = st.text_input("Site II")
                 f_num_serie = st.text_input("Nº Série")
+
+            with col_fc3:
                 f_local_existente = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_cadastrados)
                 f_local_novo = st.text_input("Ou digite um novo Local")
-                f_elemento = st.text_input("Elemento")
+                
+                f_elemento_existente = st.selectbox("Elemento (Padrão)", options=[""] + elementos_cadastrados)
+                f_elemento_novo = st.text_input("Ou digite um novo Elemento")
+                
                 f_responsavel = st.selectbox("Responsável", options=lista_responsaveis if lista_responsaveis else ["Support"])
+                f_data_cad = st.date_input("Data de Cadastro", value=agora_br().date())
                 f_prazo = st.date_input("Prazo de Entrega", value=agora_br() + timedelta(days=7))
 
             f_observacoes = st.text_area("Observações")
 
             if st.form_submit_button("Salvar Registro", use_container_width=True):
                 f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
+                f_elemento_final = f_elemento_novo.strip() if f_elemento_novo.strip() else f_elemento_existente
                 if f_acionamento and f_projeto:
                     with get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), f_data_cad.strftime("%d/%m/%Y"), f_observacoes))
+                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento_final, f_responsavel, f_prazo.strftime("%d/%m/%Y"), f_data_cad.strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
                     st.success("Projeto cadastrado!")
@@ -644,6 +657,7 @@ with aba_lista:
             with st.popover("✏️ Editar Projeto", use_container_width=True):
                 st.write(f"**Editando ID #{id_selecionado}**")
                 locais_cadastrados_edit = obter_locais_cadastrados()
+                elementos_cadastrados_edit = obter_elementos_cadastrados()
                 cli_edit = obter_clientes()
                 resp_edit = obter_responsaveis()
                 
@@ -664,7 +678,11 @@ with aba_lista:
                     e_loc_existente = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_cadastrados_edit, index=idx_loc)
                     e_loc_novo = st.text_input("Ou digite um novo Local", value="" if idx_loc > 0 else e_loc_atual)
 
-                    e_elem = st.text_input("Elemento", value=str(item_sel['elemento'] or ''))
+                    e_elem_atual = str(item_sel['elemento'] or '')
+                    idx_elem = elementos_cadastrados_edit.index(e_elem_atual) + 1 if e_elem_atual in elementos_cadastrados_edit else 0
+                    e_elem_existente = st.selectbox("Elemento (Padrão)", options=[""] + elementos_cadastrados_edit, index=idx_elem)
+                    e_elem_novo = st.text_input("Ou digite um novo Elemento", value="" if idx_elem > 0 else e_elem_atual)
+
                     e_resp = st.selectbox("Responsável", options=resp_edit, index=resp_edit.index(item_sel['responsavel']) if item_sel['responsavel'] in resp_edit else 0)
                     
                     try:
@@ -677,7 +695,8 @@ with aba_lista:
                     
                     if st.form_submit_button("Salvar Alterações"):
                         e_loc_final = e_loc_novo.strip() if e_loc_novo.strip() else e_loc_existente
-                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc_final, e_elem, e_cli, e_resp, e_data.strftime("%d/%m/%Y"), e_prazo, e_obs)
+                        e_elem_final = e_elem_novo.strip() if e_elem_novo.strip() else e_elem_existente
+                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc_final, e_elem_final, e_cli, e_resp, e_data.strftime("%d/%m/%Y"), e_prazo, e_obs)
                         st.success("Projeto atualizado com sucesso!")
                         st.rerun()
 
@@ -703,7 +722,7 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS (Cards em grade 2x2 e menu de exclusão integrado)
+# 2. KANBAN MULTI-ETAPAS
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
@@ -785,6 +804,7 @@ with aba_kanban:
                         with c_card_h2:
                             with st.popover("⚙️", help="Gerenciar / Editar / Excluir"):
                                 loc_cad_k = obter_locais_cadastrados()
+                                elem_cad_k = obter_elementos_cadastrados()
                                 cli_k = obter_clientes()
                                 resp_k = obter_responsaveis()
                                 
@@ -806,7 +826,11 @@ with aba_kanban:
                                         e_lk_ex = st.selectbox("Local / Cidade (Padrão)", options=[""] + loc_cad_k, index=idx_lk, key=f"k_lk_ex_{id_item}")
                                         e_lk_nv = st.text_input("Ou digite um novo Local", value="" if idx_lk > 0 else e_l_atual, key=f"k_lk_nv_{id_item}")
 
-                                        e_elem = st.text_input("Elemento", value=item['elemento'] or '')
+                                        e_el_atual = str(item['elemento'] or '')
+                                        idx_ek = elem_cad_k.index(e_el_atual) + 1 if e_el_atual in elem_cad_k else 0
+                                        e_ek_ex = st.selectbox("Elemento (Padrão)", options=[""] + elem_cad_k, index=idx_ek, key=f"k_ek_ex_{id_item}")
+                                        e_ek_nv = st.text_input("Ou digite um novo Elemento", value="" if idx_ek > 0 else e_el_atual, key=f"k_ek_nv_{id_item}")
+
                                         e_resp = st.selectbox("Responsável", options=resp_k, index=resp_k.index(item['responsavel']) if item['responsavel'] in resp_k else 0)
                                         
                                         try:
@@ -819,7 +843,8 @@ with aba_kanban:
                                         
                                         if st.form_submit_button("Salvar"):
                                             e_l_final = e_lk_nv.strip() if e_lk_nv.strip() else e_lk_ex
-                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_l_final, e_elem, e_cli, e_resp, e_data_k.strftime("%d/%m/%Y"), e_prazo, e_obs)
+                                            e_el_final = e_ek_nv.strip() if e_ek_nv.strip() else e_ek_ex
+                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_l_final, e_el_final, e_cli, e_resp, e_data_k.strftime("%d/%m/%Y"), e_prazo, e_obs)
                                             st.rerun()
 
                                 with st.expander("🗑️ Excluir Projeto", expanded=False):
@@ -1139,31 +1164,35 @@ with aba_usuarios:
                             st.error("Cliente já cadastrado!")
 
         with col_c_list:
-            st.markdown("### 📋 Clientes Cadastrados")
+            st.markdown("### 📋 Clientes Cadastrados (Editar / Excluir)")
             with get_connection() as conn:
                 df_cli = pd.read_sql("SELECT id, nome FROM clientes ORDER BY nome", conn)
             
             for _, c_row in df_cli.iterrows():
                 with st.container(border=True):
-                    cc1, cc2 = st.columns([3, 1])
+                    cc1, cc2 = st.columns(2)
                     with cc1:
-                        st.write(f"**{c_row['nome']}**")
-                    with cc2:
-                        with st.popover("⚙️"):
+                        with st.popover("✏️ Editar", use_container_width=True):
                             with st.form(f"edt_cli_{c_row['id']}"):
                                 n_cli_edit = st.text_input("Nome", value=c_row['nome'])
-                                if st.form_submit_button("Atualizar"):
+                                if st.form_submit_button("Salvar"):
                                     with get_connection() as conn:
                                         cursor = conn.cursor()
                                         cursor.execute("UPDATE clientes SET nome=? WHERE id=?", (n_cli_edit, c_row['id']))
                                         conn.commit()
+                                    st.success("Atualizado!")
                                     st.rerun()
-                            if st.button("Excluir", key=f"del_cli_{c_row['id']}"):
+                    with cc2:
+                        with st.popover("🗑️ Excluir", use_container_width=True):
+                            st.warning("Excluir cliente?")
+                            if st.button("Sim, Excluir", key=f"del_cli_{c_row['id']}"):
                                 with get_connection() as conn:
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM clientes WHERE id=?", (c_row['id'],))
                                     conn.commit()
+                                st.success("Removido!")
                                 st.rerun()
+                    st.write(f"**{c_row['nome']}**")
 
     # GERENCIAMENTO DE RESPONSÁVEIS
     with tab_u_sub3:
@@ -1185,28 +1214,32 @@ with aba_usuarios:
                             st.error("Responsável já cadastrado!")
 
         with col_r_list:
-            st.markdown("### 📋 Responsáveis Cadastrados")
+            st.markdown("### 📋 Responsáveis Cadastrados (Editar / Excluir)")
             with get_connection() as conn:
                 df_resp = pd.read_sql("SELECT id, nome FROM responsaveis ORDER BY nome", conn)
             
             for _, r_row in df_resp.iterrows():
                 with st.container(border=True):
-                    rc1, rc2 = st.columns([3, 1])
+                    rc1, rc2 = st.columns(2)
                     with rc1:
-                        st.write(f"**{r_row['nome']}**")
-                    with rc2:
-                        with st.popover("⚙️"):
+                        with st.popover("✏️ Editar", use_container_width=True):
                             with st.form(f"edt_resp_{r_row['id']}"):
                                 n_resp_edit = st.text_input("Nome", value=r_row['nome'])
-                                if st.form_submit_button("Atualizar"):
+                                if st.form_submit_button("Salvar"):
                                     with get_connection() as conn:
                                         cursor = conn.cursor()
                                         cursor.execute("UPDATE responsaveis SET nome=? WHERE id=?", (n_resp_edit, r_row['id']))
                                         conn.commit()
+                                    st.success("Atualizado!")
                                     st.rerun()
-                            if st.button("Excluir", key=f"del_resp_{r_row['id']}"):
+                    with rc2:
+                        with st.popover("🗑️ Excluir", use_container_width=True):
+                            st.warning("Excluir responsável?")
+                            if st.button("Sim, Excluir", key=f"del_resp_{r_row['id']}"):
                                 with get_connection() as conn:
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM responsaveis WHERE id=?", (r_row['id'],))
                                     conn.commit()
+                                st.success("Removido!")
                                 st.rerun()
+                    st.write(f"**{r_row['nome']}**")
