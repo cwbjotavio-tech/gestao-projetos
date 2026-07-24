@@ -238,6 +238,12 @@ def init_db():
 init_db()
 
 # --- FUNÇÕES UTILITÁRIAS ---
+def obter_locais_cadastrados():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local")
+        return [row[0] for row in cursor.fetchall()]
+
 def classificar_situacao(status):
     if status == 'Concluído':
         return 'Finalizado'
@@ -512,6 +518,8 @@ with col_b1:
 with col_b2:
     with st.popover("➕ Cadastrar Projeto", use_container_width=True):
         st.subheader("Novo Cadastro")
+        locais_cadastrados = obter_locais_cadastrados()
+        
         with st.form("form_nova_torre", clear_on_submit=True):
             f_acionamento = st.text_input("Acionamento *")
             f_projeto = st.text_input("Projeto *")
@@ -523,20 +531,27 @@ with col_b2:
             f_site1 = st.text_input("Site I")
             f_site2 = st.text_input("Site II")
             f_num_serie = st.text_input("Nº Série")
-            f_local = st.text_input("Local")
+            
+            # Campo de Local/Cidade com Sugestões e Padrão
+            st.markdown("---")
+            st.caption("📍 Padrão de Local / Cidade")
+            f_local_existente = st.selectbox("Selecionar Local já cadastrado", options=[""] + locais_cadastrados)
+            f_local_novo = st.text_input("Ou digite um novo Local (opcional)")
+            
             f_elemento = st.text_input("Elemento")
             f_responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
             f_prazo = st.date_input("Prazo de Entrega", value=agora_br() + timedelta(days=7))
             f_observacoes = st.text_area("Observações")
 
             if st.form_submit_button("Salvar Registro"):
+                f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
                 if f_acionamento and f_projeto:
                     with get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), agora_br().strftime("%d/%m/%Y"), f_observacoes))
+                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), agora_br().strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
                     st.success("Projeto cadastrado!")
@@ -646,6 +661,7 @@ with aba_lista:
         with col_act1:
             with st.popover("✏️ Editar Projeto", use_container_width=True):
                 st.write(f"**Editando ID #{id_selecionado}**")
+                locais_cadastrados_edit = obter_locais_cadastrados()
                 with st.form(key=f"form_edit_list_{id_selecionado}"):
                     e_ac = st.text_input("Acionamento", value=str(item_sel['acionamento']))
                     e_proj = st.text_input("Projeto", value=str(item_sel['projeto']))
@@ -657,14 +673,20 @@ with aba_lista:
                     e_s1 = st.text_input("Site I", value=str(item_sel['site_1'] or ''))
                     e_s2 = st.text_input("Site II", value=str(item_sel['site_2'] or ''))
                     e_ns = st.text_input("Nº Série", value=str(item_sel['num_serie'] or ''))
-                    e_loc = st.text_input("Local", value=str(item_sel['local'] or ''))
+                    
+                    e_loc_atual = str(item_sel['local'] or '')
+                    idx_loc = locais_cadastrados_edit.index(e_loc_atual) + 1 if e_loc_atual in locais_cadastrados_edit else 0
+                    e_loc_existente = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_cadastrados_edit, index=idx_loc)
+                    e_loc_novo = st.text_input("Ou digite um novo Local", value="" if idx_loc > 0 else e_loc_atual)
+
                     e_elem = st.text_input("Elemento", value=str(item_sel['elemento'] or ''))
                     e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
                     e_prazo = st.text_input("Prazo", value=str(item_sel['prazo']))
                     e_obs = st.text_area("Observações", value=str(item_sel['observacoes'] or ''))
                     
                     if st.form_submit_button("Salvar Alterações"):
-                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc, e_elem, e_cli, e_resp, e_prazo, e_obs)
+                        e_loc_final = e_loc_novo.strip() if e_loc_novo.strip() else e_loc_existente
+                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc_final, e_elem, e_cli, e_resp, e_prazo, e_obs)
                         st.success("Projeto atualizado com sucesso!")
                         st.rerun()
 
@@ -690,7 +712,7 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS (Fontes maiores, checkbox de seleção e avanço em lote)
+# 2. KANBAN MULTI-ETAPAS
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
@@ -711,7 +733,7 @@ with aba_kanban:
                 key="etapas_kanban_multiselect"
             )
         with fk_c3:
-            st.write("") # espaçamento
+            st.write("")
             if st.button("🚀 Avançar Selecionados", use_container_width=True, help="Avança todos os cards marcados para a próxima etapa"):
                 proximo_map = {"Projeto": "Steel", "Steel": "Sankhya", "Sankhya": "Concluído"}
                 atualizados = 0
@@ -772,6 +794,7 @@ with aba_kanban:
                         with c_card_h2:
                             with st.popover("⚙️", help="Opções"):
                                 st.caption("Editar / Excluir")
+                                loc_cad_k = obter_locais_cadastrados()
                                 with st.expander("✏️ Editar", expanded=False):
                                     with st.form(key=f"k_edit_form_{id_item}"):
                                         e_ac = st.text_input("Acionamento", value=item['acionamento'])
@@ -784,13 +807,19 @@ with aba_kanban:
                                         e_s1 = st.text_input("Site I", value=item['site_1'] or '')
                                         e_s2 = st.text_input("Site II", value=item['site_2'] or '')
                                         e_ns = st.text_input("Nº Série", value=item['num_serie'] or '')
-                                        e_loc = st.text_input("Local", value=item['local'] or '')
+                                        
+                                        e_l_atual = str(item['local'] or '')
+                                        idx_lk = loc_cad_k.index(e_l_atual) + 1 if e_l_atual in loc_cad_k else 0
+                                        e_lk_ex = st.selectbox("Local / Cidade (Padrão)", options=[""] + loc_cad_k, index=idx_lk, key=f"k_lk_ex_{id_item}")
+                                        e_lk_nv = st.text_input("Ou digite um novo Local", value="" if idx_lk > 0 else e_l_atual, key=f"k_lk_nv_{id_item}")
+
                                         e_elem = st.text_input("Elemento", value=item['elemento'] or '')
                                         e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
                                         e_prazo = st.text_input("Prazo", value=item['prazo'])
                                         e_obs = st.text_area("Observações", value=item['observacoes'] or "")
                                         if st.form_submit_button("Salvar"):
-                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc, e_elem, e_cli, e_resp, e_prazo, e_obs)
+                                            e_l_final = e_lk_nv.strip() if e_lk_nv.strip() else e_lk_ex
+                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_l_final, e_elem, e_cli, e_resp, e_prazo, e_obs)
                                             st.rerun()
 
                                 with st.expander("🗑️ Excluir", expanded=False):
@@ -802,7 +831,6 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        # Card com tamanho de fonte aumentado (15.5px) e sem informação de peso
                         st.markdown(f"""
                         <div style="background-color: #1e293b; padding: 10px 12px; border-radius: 6px; font-size: 15.5px; line-height: 1.6; color: #cbd5e1; margin-top: 6px; margin-bottom: 8px; border: 1px solid #334155;">
                             ⚡ <b>Acion:</b> {item['acionamento']}<br>
