@@ -20,10 +20,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado - Ajustado para melhor legibilidade e visualização
+# 2. CSS Customizado
 st.markdown("""
     <style>
-    /* Otimização de Espaço do Topo com margem suficiente para o Título Principal */
     .block-container {
         padding-top: 2.5rem !important;
         padding-bottom: 1rem !important;
@@ -32,19 +31,16 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* Fundo Geral da Aplicação */
     .stApp {
         background-color: #0f172a !important;
         color: #f8fafc !important;
         font-family: 'Inter', sans-serif;
     }
     
-    /* Ajuste de Posição do Título H1 */
     h1 {
         font-size: 1.8rem !important;
         margin-top: 0.5rem !important;
         margin-bottom: 0.5rem !important;
-        padding-top: 0px !important;
         font-weight: 700 !important;
     }
 
@@ -57,7 +53,6 @@ st.markdown("""
         color: #f8fafc !important;
     }
 
-    /* Estilização das Abas (Tabs) */
     .stTabs {
         margin-top: 0.5rem !important;
     }
@@ -81,7 +76,6 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* Campos de Entrada e Selects */
     input, select, textarea, div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         background-color: #1e293b !important;
         color: #f8fafc !important;
@@ -94,7 +88,6 @@ st.markdown("""
         opacity: 1;
     }
 
-    /* Dropdowns / Menus */
     div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
         background-color: #1e293b !important;
         color: #f8fafc !important;
@@ -107,7 +100,6 @@ st.markdown("""
         background-color: #334155 !important;
     }
 
-    /* Botões Padrão */
     .stButton > button, div[data-testid="stPopover"] > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
@@ -121,25 +113,12 @@ st.markdown("""
         background-color: #1d4ed8 !important;
     }
 
-    /* Card Container no Kanban */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
-        padding: 0px !important;
-    }
-    div[data-testid="stElementContainer"] {
-        margin-bottom: 2px !important;
-    }
-    [data-testid="stForm"] {
-        padding: 0.5rem !important;
-    }
-
-    /* Dataframe / Tabelas */
     [data-testid="stDataFrame"] {
         background-color: #1e293b !important;
         border-radius: 8px;
         border: 1px solid #334155;
     }
 
-    /* Cartões de Métricas */
     [data-testid="stMetric"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
@@ -165,6 +144,18 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 nome TEXT NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS clientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS responsaveis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL
             )
         ''')
         cursor.execute('''
@@ -201,38 +192,21 @@ def init_db():
             )
         ''')
         
-        cols_novas = [
-            ("revisao", "TEXT DEFAULT '00'"),
-            ("site_1", "TEXT DEFAULT ''"),
-            ("site_2", "TEXT DEFAULT ''"),
-            ("num_serie", "TEXT DEFAULT ''"),
-            ("local", "TEXT DEFAULT ''"),
-            ("elemento", "TEXT DEFAULT ''"),
-            ("observacoes", "TEXT DEFAULT ''"),
-            ("estado_relogio", "TEXT DEFAULT 'parado'"),
-            ("timestamp_ultimo_inicio", "TEXT DEFAULT ''"),
-            ("tempo_projeto_sec", "INTEGER DEFAULT 0"),
-            ("inicio_projeto", "TEXT DEFAULT ''"),
-            ("fim_projeto", "TEXT DEFAULT ''"),
-            ("tempo_steel_sec", "INTEGER DEFAULT 0"),
-            ("inicio_steel", "TEXT DEFAULT ''"),
-            ("fim_steel", "TEXT DEFAULT ''"),
-            ("tempo_sankhya_sec", "INTEGER DEFAULT 0"),
-            ("inicio_sankhya", "TEXT DEFAULT ''"),
-            ("fim_sankhya", "TEXT DEFAULT ''")
-        ]
-        for col_nome, col_tipo in cols_novas:
-            try:
-                cursor.execute(f"ALTER TABLE torres ADD COLUMN {col_nome} {col_tipo}")
-            except sqlite3.OperationalError:
-                pass
+        # Seeds padrão se tabelas estiverem vazias
+        cursor.execute("SELECT COUNT(*) FROM usuarios")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)", ("admin", hash_password("admin123"), "Administrador"))
+        
+        cursor.execute("SELECT COUNT(*) FROM clientes")
+        if cursor.fetchone()[0] == 0:
+            for cli in ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"]:
+                cursor.execute("INSERT OR IGNORE INTO clientes (nome) VALUES (?)", (cli,))
 
-        cursor.execute("SELECT * FROM usuarios WHERE username = 'admin'")
-        if not cursor.fetchone():
-            cursor.execute(
-                "INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
-                ("admin", hash_password("admin123"), "Administrador")
-            )
+        cursor.execute("SELECT COUNT(*) FROM responsaveis")
+        if cursor.fetchone()[0] == 0:
+            for resp in ["Ark Steel", "Support", "Towertec"]:
+                cursor.execute("INSERT OR IGNORE INTO responsaveis (nome) VALUES (?)", (resp,))
+
         conn.commit()
 
 init_db()
@@ -244,11 +218,25 @@ def obter_locais_cadastrados():
         cursor.execute("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local")
         return [row[0] for row in cursor.fetchall()]
 
-def classificar_situacao(status):
-    if status == 'Concluído':
+def obter_clientes():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome FROM clientes ORDER BY nome")
+        return [row[0] for row in cursor.fetchall()]
+
+def obter_responsaveis():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome FROM responsaveis ORDER BY nome")
+        return [row[0] for row in cursor.fetchall()]
+
+def classificar_situacao(row):
+    if row['status_projeto'] == 'Concluído':
         return 'Finalizado'
-    elif status == 'Cancelado':
+    elif row['status_projeto'] == 'Cancelado':
         return 'Cancelado'
+    elif row['estado_relogio'] == 'parado':
+        return 'Parados'
     else:
         return 'Em Progresso'
 
@@ -386,16 +374,16 @@ def excluir_torre(torre_id):
         conn.commit()
     st.cache_data.clear()
 
-def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, prazo, observacoes):
+def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE torres SET 
                 acionamento=?, projeto=?, revisao=?, tipo=?, finalidade=?, peso=?, 
                 site_1=?, site_2=?, num_serie=?, local=?, elemento=?, cliente=?, 
-                responsavel=?, prazo=?, observacoes=?
+                responsavel=?, data=?, prazo=?, observacoes=?
             WHERE id=?
-        ''', (acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, prazo, observacoes, torre_id))
+        ''', (acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes, torre_id))
         conn.commit()
     st.cache_data.clear()
 
@@ -412,9 +400,9 @@ def carregar_dados():
 
 # --- TELA DE LOGIN E SESSÃO ---
 if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = True
-    st.session_state["usuario_nome"] = "Administrador"
-    st.session_state["usuario_login"] = "admin"
+    st.session_state["autenticado"] = False
+    st.session_state["usuario_nome"] = ""
+    st.session_state["usuario_login"] = ""
 
 if not st.session_state["autenticado"]:
     _, col_l2, _ = st.columns([1, 2, 1])
@@ -447,7 +435,6 @@ if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
 # --- APLICAÇÃO PRINCIPAL ---
 df_global = carregar_dados()
 
-# CABEÇALHO
 col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 
 with col_title:
@@ -515,35 +502,39 @@ with col_b1:
             except Exception as e:
                 st.error(f"Erro ao importar: {e}")
 
+# --- CADASTRO EM DUAS COLUNAS ---
 with col_b2:
     with st.popover("➕ Cadastrar Projeto", use_container_width=True):
         st.subheader("Novo Cadastro")
         locais_cadastrados = obter_locais_cadastrados()
+        lista_clientes = obter_clientes()
+        lista_responsaveis = obter_responsaveis()
         
         with st.form("form_nova_torre", clear_on_submit=True):
-            f_acionamento = st.text_input("Acionamento *")
-            f_projeto = st.text_input("Projeto *")
-            f_revisao = st.text_input("Revisão", value="00")
-            f_cliente = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"])
-            f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
-            f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
-            f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
-            f_site1 = st.text_input("Site I")
-            f_site2 = st.text_input("Site II")
-            f_num_serie = st.text_input("Nº Série")
-            
-            # Campo de Local/Cidade com Sugestões e Padrão
-            st.markdown("---")
-            st.caption("📍 Padrão de Local / Cidade")
-            f_local_existente = st.selectbox("Selecionar Local já cadastrado", options=[""] + locais_cadastrados)
-            f_local_novo = st.text_input("Ou digite um novo Local (opcional)")
-            
-            f_elemento = st.text_input("Elemento")
-            f_responsavel = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
-            f_prazo = st.date_input("Prazo de Entrega", value=agora_br() + timedelta(days=7))
+            col_fc1, col_fc2 = st.columns(2)
+            with col_fc1:
+                f_acionamento = st.text_input("Acionamento *")
+                f_projeto = st.text_input("Projeto *")
+                f_revisao = st.text_input("Revisão", value="00")
+                f_cliente = st.selectbox("Cliente", options=lista_clientes if lista_clientes else ["BTC"])
+                f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
+                f_data_cad = st.date_input("Data de Cadastro", value=agora_br().date())
+
+            with col_fc2:
+                f_site1 = st.text_input("Site I")
+                f_site2 = st.text_input("Site II")
+                f_num_serie = st.text_input("Nº Série")
+                f_local_existente = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_cadastrados)
+                f_local_novo = st.text_input("Ou digite um novo Local")
+                f_elemento = st.text_input("Elemento")
+                f_responsavel = st.selectbox("Responsável", options=lista_responsaveis if lista_responsaveis else ["Support"])
+                f_prazo = st.date_input("Prazo de Entrega", value=agora_br() + timedelta(days=7))
+
             f_observacoes = st.text_area("Observações")
 
-            if st.form_submit_button("Salvar Registro"):
+            if st.form_submit_button("Salvar Registro", use_container_width=True):
                 f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
                 if f_acionamento and f_projeto:
                     with get_connection() as conn:
@@ -551,7 +542,7 @@ with col_b2:
                         cursor.execute('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), agora_br().strftime("%d/%m/%Y"), f_observacoes))
+                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento, f_responsavel, f_prazo.strftime("%d/%m/%Y"), f_data_cad.strftime("%d/%m/%Y"), f_observacoes))
                         conn.commit()
                     st.cache_data.clear()
                     st.success("Projeto cadastrado!")
@@ -564,31 +555,27 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
     "📈 Dashboards", 
     "✅ Finalizados",
     "🚫 Cancelados",
-    "👥 Usuários"
+    "👥 Usuários & Cadastros"
 ])
 
 # 1. LISTAGEM
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar por projeto, acionamento...")
+        busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar por projeto, acionamento...", key="pesquisa_rapida_lista")
     with c2:
-        filtro_cliente = st.multiselect("Cliente", options=df_global["cliente"].dropna().unique() if not df_global.empty else [])
-    with c3:
         filtro_status = st.multiselect("Etapa (Status)", options=df_global["status_projeto"].dropna().unique() if not df_global.empty else [])
-    with c4:
-        filtro_situacao = st.multiselect("Situação do Projeto", options=["Em Progresso", "Finalizado", "Cancelado"])
+    with c3:
+        filtro_situacao = st.multiselect("Situação do Projeto", options=["Em Progresso", "Parados", "Finalizado", "Cancelado"])
 
     df_view = df_global.copy()
 
     if not df_view.empty:
-        df_view['situacao_filtro'] = df_view['status_projeto'].apply(classificar_situacao)
+        df_view['situacao_filtro'] = df_view.apply(classificar_situacao, axis=1)
 
     if busca_texto and not df_view.empty:
         df_view = df_view[df_view.astype(str).apply(lambda row: row.str.contains(busca_texto, case=False).any(), axis=1)]
-    if filtro_cliente and not df_view.empty:
-        df_view = df_view[df_view["cliente"].isin(filtro_cliente)]
     if filtro_status and not df_view.empty:
         df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
     if filtro_situacao and not df_view.empty:
@@ -622,7 +609,7 @@ with aba_lista:
             'rodando': '🟢 Em Execução', 'parado': '🔴 Pausado'
         }).fillna('🔴 Pausado')
         
-        df_view['Data de Cadastro'] = df_view['inicio_projeto'].apply(lambda x: x if x else '-')
+        df_view['Data de Cadastro'] = df_view['data'].apply(lambda x: x if x else '-')
         df_view['Fim Projeto'] = df_view['fim_projeto'].apply(lambda x: x if x else '-')
         df_view['Fim Steel'] = df_view['fim_steel'].apply(lambda x: x if x else '-')
         df_view['Fim Sankhya'] = df_view['fim_sankhya'].apply(lambda x: x if x else '-')
@@ -631,23 +618,18 @@ with aba_lista:
         df_view['Tempo Steel'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'steel')), axis=1)
         df_view['Tempo Sankhya'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'sankhya')), axis=1)
 
-        df_view['Status Projeto'] = df_view.apply(lambda r: 'Concluído' if r['fim_projeto'] else ('Em Andamento' if r['status_projeto'] == 'Projeto' else 'Pendente'), axis=1)
-        df_view['Status Steel'] = df_view.apply(lambda r: 'Concluído' if r['fim_steel'] else ('Em Andamento' if r['status_projeto'] == 'Steel' else 'Pendente'), axis=1)
-        df_view['Status Sankhya'] = df_view.apply(lambda r: 'Concluído' if r['fim_sankhya'] else ('Em Andamento' if r['status_projeto'] == 'Sankhya' else 'Pendente'), axis=1)
-
         cols_display = [
             'ID', 'Acionamento', 'Projeto', 'Revisão', 'Tipo', 'Finalidade', 'Peso (kg)',
             'Site I', 'Site II', 'Nº. Série', 'Local', 'Elemento', 'Cliente', 'Responsável',
             'Data', 'Prazo', 'Etapa', 'Situação', 'Progresso (%)', 'Status Geral', 'Data de Cadastro',
             'Fim Projeto', 'Fim Steel', 'Fim Sankhya', 'Tempo Projeto', 'Tempo Steel',
-            'Tempo Sankhya', 'Status Projeto', 'Status Steel', 'Status Sankhya'
+            'Tempo Sankhya'
         ]
         
         st.dataframe(df_view[cols_display], use_container_width=True, hide_index=True)
 
         st.divider()
 
-        # PAINEL DE AÇÕES
         st.subheader("⚡ Ações na Listagem (Editar / Excluir Registros)")
         col_sel, col_act1, col_act2 = st.columns([3, 1, 1])
 
@@ -662,11 +644,14 @@ with aba_lista:
             with st.popover("✏️ Editar Projeto", use_container_width=True):
                 st.write(f"**Editando ID #{id_selecionado}**")
                 locais_cadastrados_edit = obter_locais_cadastrados()
+                cli_edit = obter_clientes()
+                resp_edit = obter_responsaveis()
+                
                 with st.form(key=f"form_edit_list_{id_selecionado}"):
                     e_ac = st.text_input("Acionamento", value=str(item_sel['acionamento']))
                     e_proj = st.text_input("Projeto", value=str(item_sel['projeto']))
                     e_rev = st.text_input("Revisão", value=str(item_sel['revisao'] or '00'))
-                    e_cli = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"], index=0)
+                    e_cli = st.selectbox("Cliente", options=cli_edit, index=cli_edit.index(item_sel['cliente']) if item_sel['cliente'] in cli_edit else 0)
                     e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
                     e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
                     e_peso = st.number_input("Peso (kg)", value=float(item_sel['peso']))
@@ -680,13 +665,19 @@ with aba_lista:
                     e_loc_novo = st.text_input("Ou digite um novo Local", value="" if idx_loc > 0 else e_loc_atual)
 
                     e_elem = st.text_input("Elemento", value=str(item_sel['elemento'] or ''))
-                    e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
+                    e_resp = st.selectbox("Responsável", options=resp_edit, index=resp_edit.index(item_sel['responsavel']) if item_sel['responsavel'] in resp_edit else 0)
+                    
+                    try:
+                        dt_parsed = datetime.strptime(str(item_sel['data']), "%d/%m/%Y").date()
+                    except:
+                        dt_parsed = agora_br().date()
+                    e_data = st.date_input("Data de Cadastro", value=dt_parsed)
                     e_prazo = st.text_input("Prazo", value=str(item_sel['prazo']))
                     e_obs = st.text_area("Observações", value=str(item_sel['observacoes'] or ''))
                     
                     if st.form_submit_button("Salvar Alterações"):
                         e_loc_final = e_loc_novo.strip() if e_loc_novo.strip() else e_loc_existente
-                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc_final, e_elem, e_cli, e_resp, e_prazo, e_obs)
+                        editar_torre_completo(id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_loc_final, e_elem, e_cli, e_resp, e_data.strftime("%d/%m/%Y"), e_prazo, e_obs)
                         st.success("Projeto atualizado com sucesso!")
                         st.rerun()
 
@@ -712,7 +703,7 @@ with aba_lista:
     else:
         st.info("Nenhum registro encontrado.")
 
-# 2. KANBAN MULTI-ETAPAS
+# 2. KANBAN MULTI-ETAPAS (Cards em grade 2x2 e menu de exclusão integrado)
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     
@@ -790,17 +781,19 @@ with aba_kanban:
                         with c_card_chk:
                             st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
                         with c_card_h1:
-                            st.markdown(f"<div style='font-weight:700; font-size:16px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-weight:700; font-size:15px; color:#f8fafc; line-height:1.2; word-break: break-word;'>#{id_item} - {item['projeto']}</div>", unsafe_allow_html=True)
                         with c_card_h2:
-                            with st.popover("⚙️", help="Opções"):
-                                st.caption("Editar / Excluir")
+                            with st.popover("⚙️", help="Gerenciar / Editar / Excluir"):
                                 loc_cad_k = obter_locais_cadastrados()
-                                with st.expander("✏️ Editar", expanded=False):
+                                cli_k = obter_clientes()
+                                resp_k = obter_responsaveis()
+                                
+                                with st.expander("✏️ Editar Projeto", expanded=False):
                                     with st.form(key=f"k_edit_form_{id_item}"):
                                         e_ac = st.text_input("Acionamento", value=item['acionamento'])
                                         e_proj = st.text_input("Projeto", value=item['projeto'])
                                         e_rev = st.text_input("Revisão", value=item['revisao'] or '00')
-                                        e_cli = st.selectbox("Cliente", ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"], index=0)
+                                        e_cli = st.selectbox("Cliente", options=cli_k, index=cli_k.index(item['cliente']) if item['cliente'] in cli_k else 0)
                                         e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
                                         e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
                                         e_peso = st.number_input("Peso (kg)", value=float(item['peso']))
@@ -814,16 +807,23 @@ with aba_kanban:
                                         e_lk_nv = st.text_input("Ou digite um novo Local", value="" if idx_lk > 0 else e_l_atual, key=f"k_lk_nv_{id_item}")
 
                                         e_elem = st.text_input("Elemento", value=item['elemento'] or '')
-                                        e_resp = st.selectbox("Responsável", ["Ark Steel", "Support", "Towertec"])
+                                        e_resp = st.selectbox("Responsável", options=resp_k, index=resp_k.index(item['responsavel']) if item['responsavel'] in resp_k else 0)
+                                        
+                                        try:
+                                            dt_p = datetime.strptime(str(item['data']), "%d/%m/%Y").date()
+                                        except:
+                                            dt_p = agora_br().date()
+                                        e_data_k = st.date_input("Data de Cadastro", value=dt_p, key=f"k_data_{id_item}")
                                         e_prazo = st.text_input("Prazo", value=item['prazo'])
                                         e_obs = st.text_area("Observações", value=item['observacoes'] or "")
+                                        
                                         if st.form_submit_button("Salvar"):
                                             e_l_final = e_lk_nv.strip() if e_lk_nv.strip() else e_lk_ex
-                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_l_final, e_elem, e_cli, e_resp, e_prazo, e_obs)
+                                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns, e_l_final, e_elem, e_cli, e_resp, e_data_k.strftime("%d/%m/%Y"), e_prazo, e_obs)
                                             st.rerun()
 
-                                with st.expander("🗑️ Excluir", expanded=False):
-                                    st.write("Excluir?")
+                                with st.expander("🗑️ Excluir Projeto", expanded=False):
+                                    st.warning("Confirma a exclusão?")
                                     if st.button("Sim, Excluir", key=f"k_del_{id_item}"):
                                         excluir_torre(id_item)
                                         st.rerun()
@@ -831,21 +831,21 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        st.markdown(f"""
-                        <div style="background-color: #1e293b; padding: 10px 12px; border-radius: 6px; font-size: 15.5px; line-height: 1.6; color: #cbd5e1; margin-top: 6px; margin-bottom: 8px; border: 1px solid #334155;">
-                            ⚡ <b>Acion:</b> {item['acionamento']}<br>
-                            🏢 <b>Cli:</b> {item['cliente']}<br>
-                            📍 <b>Site I:</b> {site1_val}<br>
-                            🔢 <b>Nº Série:</b> {num_serie_val}
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # Card em 2 colunas e 2 linhas (compacto)
+                        c_info1, c_info2 = st.columns(2)
+                        with c_info1:
+                            st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>⚡ <b>Acion:</b> {item['acionamento']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>📍 <b>Site I:</b> {site1_val}</div>", unsafe_allow_html=True)
+                        with c_info2:
+                            st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>🏢 <b>Cli:</b> {item['cliente']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>🔢 <b>Série:</b> {num_serie_val}</div>", unsafe_allow_html=True)
                         
                         if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
                             segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key)
                             tempo_str = formatar_segundos(segundos_etapa)
                             status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
                             
-                            st.markdown(f"<div style='font-size:14px; font-weight:600; margin-bottom:6px;'>⏱️ <code style='font-size:13px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:13px; font-weight:600; margin-top:4px; margin-bottom:4px;'>⏱️ <code style='font-size:12px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
 
                             proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
                             
@@ -861,7 +861,7 @@ with aba_kanban:
                                         st.rerun()
                             
                             with c_btn2:
-                                if st.button("✅", key=f"k_fin_{id_item}", help="Avançar para a próxima etapa", use_container_width=True):
+                                if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
                                     acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
                                     st.rerun()
 
@@ -901,11 +901,11 @@ with aba_dash:
             with col_f5:
                 dash_tipos = st.multiselect("Filtrar por Tipo:", options=df_dash_base['tipo'].dropna().unique(), key="dash_tipo")
             with col_f6:
-                dash_situacao = st.multiselect("Filtrar por Situação:", options=["Em Progresso", "Finalizado", "Cancelado"], key="dash_situacao")
+                dash_situacao = st.multiselect("Filtrar por Situação:", options=["Em Progresso", "Parados", "Finalizado", "Cancelado"], key="dash_situacao")
 
         df_dash = df_dash_base.copy()
         if not df_dash.empty:
-            df_dash['situacao_filtro'] = df_dash['status_projeto'].apply(classificar_situacao)
+            df_dash['situacao_filtro'] = df_dash.apply(classificar_situacao, axis=1)
 
         if dash_anos:
             df_dash = df_dash[df_dash['ano'].isin(dash_anos)]
@@ -1052,32 +1052,161 @@ with aba_cancelados:
     else:
         st.info("Nenhum projeto cancelado.")
 
-# 6. GERENCIAMENTO DE USUÁRIOS
+# 6. GERENCIAMENTO DE USUÁRIOS, CLIENTES E RESPONSÁVEIS
 with aba_usuarios:
-    st.subheader("👥 Gerenciamento de Usuários do Sistema")
-    col_u1, col_u2 = st.columns([1, 1])
+    st.subheader("👥 Gerenciamento do Sistema (Usuários, Clientes & Responsáveis)")
     
-    with col_u1:
-        st.markdown("### ➕ Cadastrar Novo Usuário")
-        with st.form("form_novo_usuario", clear_on_submit=True):
-            novo_username = st.text_input("Nome de Usuário (Login) *")
-            novo_nome = st.text_input("Nome Completo *")
-            nova_senha = st.text_input("Senha *", type="password")
-            if st.form_submit_button("Cadastrar Usuário", use_container_width=True):
-                if novo_username and novo_nome and nova_senha:
-                    try:
-                        with get_connection() as conn:
-                            cursor = conn.cursor()
-                            cursor.execute("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
-                                           (novo_username, hash_password(nova_senha), novo_nome))
-                            conn.commit()
-                        st.success(f"Usuário '{novo_username}' cadastrado!")
-                        st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.error("Erro: Nome de usuário já existe!")
+    tab_u_sub1, tab_u_sub2, tab_u_sub3 = st.tabs(["👤 Usuários", "🏢 Clientes", "👷 Responsáveis"])
+    
+    # GERENCIAMENTO DE USUÁRIOS
+    with tab_u_sub1:
+        col_u1, col_u2 = st.columns([1, 1])
+        with col_u1:
+            st.markdown("### ➕ Cadastrar Novo Usuário")
+            with st.form("form_novo_usuario", clear_on_submit=True):
+                novo_username = st.text_input("Nome de Usuário (Login) *")
+                novo_nome = st.text_input("Nome Completo *")
+                nova_senha = st.text_input("Senha *", type="password")
+                if st.form_submit_button("Cadastrar Usuário", use_container_width=True):
+                    if novo_username and novo_nome and nova_senha:
+                        try:
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                cursor.execute("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
+                                               (novo_username, hash_password(nova_senha), novo_nome))
+                                conn.commit()
+                            st.success(f"Usuário '{novo_username}' cadastrado!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("Erro: Nome de usuário já existe!")
 
-    with col_u2:
-        st.markdown("### 📋 Usuários Cadastrados")
-        with get_connection() as conn:
-            df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", conn)
-        st.dataframe(df_users, use_container_width=True, hide_index=True)
+        with col_u2:
+            st.markdown("### 📋 Usuários Cadastrados (Editar / Excluir)")
+            with get_connection() as conn:
+                df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", conn)
+            
+            if not df_users.empty:
+                for _, u_row in df_users.iterrows():
+                    with st.container(border=True):
+                        st.write(f"**{u_row['nome']}** (`{u_row['username']}`)")
+                        uc1, uc2 = st.columns(2)
+                        with uc1:
+                            with st.popover("✏️ Editar", use_container_width=True):
+                                with st.form(f"form_edt_user_{u_row['id']}"):
+                                    eu_nome = st.text_input("Nome", value=u_row['nome'])
+                                    eu_user = st.text_input("Login", value=u_row['username'])
+                                    eu_senha = st.text_input("Nova Senha (deixe em branco se não mudar)", type="password")
+                                    if st.form_submit_button("Salvar"):
+                                        with get_connection() as conn:
+                                            cursor = conn.cursor()
+                                            if eu_senha.strip():
+                                                cursor.execute("UPDATE usuarios SET nome=?, username=?, password_hash=? WHERE id=?",
+                                                               (eu_nome, eu_user, hash_password(eu_senha), u_row['id']))
+                                            else:
+                                                cursor.execute("UPDATE usuarios SET nome=?, username=? WHERE id=?",
+                                                               (eu_nome, eu_user, u_row['id']))
+                                            conn.commit()
+                                        st.success("Atualizado!")
+                                        st.rerun()
+                        with uc2:
+                            with st.popover("🗑️ Excluir", use_container_width=True):
+                                st.warning("Excluir usuário?")
+                                if st.button("Sim, Excluir", key=f"del_u_{u_row['id']}"):
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        cursor.execute("DELETE FROM usuarios WHERE id=?", (u_row['id'],))
+                                        conn.commit()
+                                    st.success("Removido!")
+                                    st.rerun()
+
+    # GERENCIAMENTO DE CLIENTES
+    with tab_u_sub2:
+        col_c_add, col_c_list = st.columns([1, 1])
+        with col_c_add:
+            st.markdown("### ➕ Adicionar Cliente")
+            with st.form("form_add_cli", clear_on_submit=True):
+                novo_cli_nome = st.text_input("Nome do Cliente *")
+                if st.form_submit_button("Adicionar Cliente", use_container_width=True):
+                    if novo_cli_nome.strip():
+                        try:
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                cursor.execute("INSERT INTO clientes (nome) VALUES (?)", (novo_cli_nome.strip(),))
+                                conn.commit()
+                            st.success("Cliente adicionado!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("Cliente já cadastrado!")
+
+        with col_c_list:
+            st.markdown("### 📋 Clientes Cadastrados")
+            with get_connection() as conn:
+                df_cli = pd.read_sql("SELECT id, nome FROM clientes ORDER BY nome", conn)
+            
+            for _, c_row in df_cli.iterrows():
+                with st.container(border=True):
+                    cc1, cc2 = st.columns([3, 1])
+                    with cc1:
+                        st.write(f"**{c_row['nome']}**")
+                    with cc2:
+                        with st.popover("⚙️"):
+                            with st.form(f"edt_cli_{c_row['id']}"):
+                                n_cli_edit = st.text_input("Nome", value=c_row['nome'])
+                                if st.form_submit_button("Atualizar"):
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        cursor.execute("UPDATE clientes SET nome=? WHERE id=?", (n_cli_edit, c_row['id']))
+                                        conn.commit()
+                                    st.rerun()
+                            if st.button("Excluir", key=f"del_cli_{c_row['id']}"):
+                                with get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM clientes WHERE id=?", (c_row['id'],))
+                                    conn.commit()
+                                st.rerun()
+
+    # GERENCIAMENTO DE RESPONSÁVEIS
+    with tab_u_sub3:
+        col_r_add, col_r_list = st.columns([1, 1])
+        with col_r_add:
+            st.markdown("### ➕ Adicionar Responsável")
+            with st.form("form_add_resp", clear_on_submit=True):
+                novo_resp_nome = st.text_input("Nome do Responsável *")
+                if st.form_submit_button("Adicionar Responsável", use_container_width=True):
+                    if novo_resp_nome.strip():
+                        try:
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                cursor.execute("INSERT INTO responsaveis (nome) VALUES (?)", (novo_resp_nome.strip(),))
+                                conn.commit()
+                            st.success("Responsável adicionado!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("Responsável já cadastrado!")
+
+        with col_r_list:
+            st.markdown("### 📋 Responsáveis Cadastrados")
+            with get_connection() as conn:
+                df_resp = pd.read_sql("SELECT id, nome FROM responsaveis ORDER BY nome", conn)
+            
+            for _, r_row in df_resp.iterrows():
+                with st.container(border=True):
+                    rc1, rc2 = st.columns([3, 1])
+                    with rc1:
+                        st.write(f"**{r_row['nome']}**")
+                    with rc2:
+                        with st.popover("⚙️"):
+                            with st.form(f"edt_resp_{r_row['id']}"):
+                                n_resp_edit = st.text_input("Nome", value=r_row['nome'])
+                                if st.form_submit_button("Atualizar"):
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        cursor.execute("UPDATE responsaveis SET nome=? WHERE id=?", (n_resp_edit, r_row['id']))
+                                        conn.commit()
+                                    st.rerun()
+                            if st.button("Excluir", key=f"del_resp_{r_row['id']}"):
+                                with get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM responsaveis WHERE id=?", (r_row['id'],))
+                                    conn.commit()
+                                st.rerun()
