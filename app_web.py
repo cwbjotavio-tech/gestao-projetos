@@ -1,11 +1,11 @@
-import sqlite3
+import streamlit as st
+import pandas as pd
 import hashlib
 import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import streamlit as st
-import pandas as pd
 import plotly.express as px
+from sqlalchemy import create_engine, text
 
 # Fuso horário do Brasil
 TZ_BR = ZoneInfo("America/Sao_Paulo")
@@ -128,45 +128,46 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS E SEGURANÇA ---
-def get_connection():
-    return sqlite3.connect("gestao_torres.db", check_same_thread=False)
+# --- BANCO DE DADOS E SEGURANÇA (SUPABASE) ---
+def get_engine():
+    db_url = st.secrets["database"]["url"]
+    return create_engine(db_url)
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def init_db():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text('''
             CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 nome TEXT NOT NULL
             )
-        ''')
-        cursor.execute('''
+        '''))
+        conn.execute(text('''
             CREATE TABLE IF NOT EXISTS clientes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 nome TEXT UNIQUE NOT NULL
             )
-        ''')
-        cursor.execute('''
+        '''))
+        conn.execute(text('''
             CREATE TABLE IF NOT EXISTS responsaveis (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 nome TEXT UNIQUE NOT NULL
             )
-        ''')
-        cursor.execute('''
+        '''))
+        conn.execute(text('''
             CREATE TABLE IF NOT EXISTS torres (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 acionamento TEXT,
                 projeto TEXT,
                 revisao TEXT DEFAULT '00',
                 tipo TEXT DEFAULT 'Torre',
                 finalidade TEXT DEFAULT 'Fabricação',
-                peso REAL DEFAULT 0.0,
+                peso DOUBLE PRECISION DEFAULT 0.0,
                 site_1 TEXT DEFAULT '',
                 site_2 TEXT DEFAULT '',
                 num_serie TEXT DEFAULT '',
@@ -190,51 +191,49 @@ def init_db():
                 inicio_sankhya TEXT DEFAULT '',
                 fim_sankhya TEXT DEFAULT ''
             )
-        ''')
+        '''))
         
-        # Seeds padrão se tabelas estiverem vazias
-        cursor.execute("SELECT COUNT(*) FROM usuarios")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)", ("admin", hash_password("admin123"), "Administrador"))
+        res_user = conn.execute(text("SELECT COUNT(*) FROM usuarios")).fetchone()
+        if res_user[0] == 0:
+            conn.execute(text("INSERT INTO usuarios (username, password_hash, nome) VALUES (:u, :p, :n)"),
+                         {"u": "admin", "p": hash_password("admin123"), "n": "Administrador"})
         
-        cursor.execute("SELECT COUNT(*) FROM clientes")
-        if cursor.fetchone()[0] == 0:
+        res_cli = conn.execute(text("SELECT COUNT(*) FROM clientes")).fetchone()
+        if res_cli[0] == 0:
             for cli in ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"]:
-                cursor.execute("INSERT OR IGNORE INTO clientes (nome) VALUES (?)", (cli,))
+                conn.execute(text("INSERT INTO clientes (nome) VALUES (:nome) ON CONFLICT (nome) DO NOTHING"), {"nome": cli})
 
-        cursor.execute("SELECT COUNT(*) FROM responsaveis")
-        if cursor.fetchone()[0] == 0:
+        res_resp = conn.execute(text("SELECT COUNT(*) FROM responsaveis")).fetchone()
+        if res_resp[0] == 0:
             for resp in ["Ark Steel", "Support", "Towertec"]:
-                cursor.execute("INSERT OR IGNORE INTO responsaveis (nome) VALUES (?)", (resp,))
-
-        conn.commit()
+                conn.execute(text("INSERT INTO responsaveis (nome) VALUES (:nome) ON CONFLICT (nome) DO NOTHING"), {"nome": resp})
 
 init_db()
 
 # --- FUNÇÕES UTILITÁRIAS ---
 def obter_locais_cadastrados():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local")
-        return [row[0] for row in cursor.fetchall()]
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local"))
+        return [row[0] for row in res.fetchall()]
 
 def obter_elementos_cadastrados():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT elemento FROM torres WHERE elemento IS NOT NULL AND elemento != '' ORDER BY elemento")
-        return [row[0] for row in cursor.fetchall()]
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT DISTINCT elemento FROM torres WHERE elemento IS NOT NULL AND elemento != '' ORDER BY elemento"))
+        return [row[0] for row in res.fetchall()]
 
 def obter_clientes():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT nome FROM clientes ORDER BY nome")
-        return [row[0] for row in cursor.fetchall()]
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT nome FROM clientes ORDER BY nome"))
+        return [row[0] for row in res.fetchall()]
 
 def obter_responsaveis():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT nome FROM responsaveis ORDER BY nome")
-        return [row[0] for row in cursor.fetchall()]
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT nome FROM responsaveis ORDER BY nome"))
+        return [row[0] for row in res.fetchall()]
 
 def classificar_situacao(row):
     if row['status_projeto'] == 'Concluído':
@@ -284,22 +283,19 @@ def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
     now_str = now_br.strftime("%d/%m/%Y %H:%M")
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT inicio_{etapa_key} FROM torres WHERE id=?", (torre_id,))
-        res = cursor.fetchone()
+    engine = get_engine()
+    with engine.begin() as conn:
+        res = conn.execute(text(f"SELECT inicio_{etapa_key} FROM torres WHERE id=:id"), {"id": torre_id}).fetchone()
         if not res or not res[0]:
-            cursor.execute(f"UPDATE torres SET inicio_{etapa_key}=? WHERE id=?", (now_str, torre_id))
-        cursor.execute("UPDATE torres SET estado_relogio='rodando', timestamp_ultimo_inicio=? WHERE id=?", (now_iso, torre_id))
-        conn.commit()
+            conn.execute(text(f"UPDATE torres SET inicio_{etapa_key}=:val WHERE id=:id"), {"val": now_str, "id": torre_id})
+        conn.execute(text("UPDATE torres SET estado_relogio='rodando', timestamp_ultimo_inicio=:ts WHERE id=:id"), {"ts": now_iso, "id": torre_id})
     st.cache_data.clear()
 
 def acao_pausar_relogio(torre_id, etapa_key):
     now_br = agora_br()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio FROM torres WHERE id=?", (torre_id,))
-        res = cursor.fetchone()
+    engine = get_engine()
+    with engine.begin() as conn:
+        res = conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio FROM torres WHERE id=:id"), {"id": torre_id}).fetchone()
         if res and res[1]:
             try:
                 dt_inicio = datetime.fromisoformat(res[1])
@@ -309,18 +305,16 @@ def acao_pausar_relogio(torre_id, etapa_key):
             except Exception:
                 elapsed = 0
             novo_tempo = (res[0] or 0) + elapsed
-            cursor.execute(f"UPDATE torres SET tempo_{etapa_key}_sec=?, estado_relogio='parado', timestamp_ultimo_inicio='' WHERE id=?", (novo_tempo, torre_id))
-            conn.commit()
+            conn.execute(text(f"UPDATE torres SET tempo_{etapa_key}_sec=:t, estado_relogio='parado', timestamp_ultimo_inicio='' WHERE id=:id"), {"t": novo_tempo, "id": torre_id})
     st.cache_data.clear()
 
 def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
     etapa_key = etapa_atual.lower()
     now_br = agora_br()
     now_str = now_br.strftime("%d/%m/%Y %H:%M")
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
-        res = cursor.fetchone()
+    engine = get_engine()
+    with engine.begin() as conn:
+        res = conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=:id"), {"id": torre_id}).fetchone()
         novo_tempo = res[0] or 0 if res else 0
         
         if res and res[2] == 'rodando' and res[1]:
@@ -332,16 +326,15 @@ def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
             except Exception:
                 pass
         
-        cursor.execute(f'''
+        conn.execute(text(f'''
             UPDATE torres SET 
-                tempo_{etapa_key}_sec=?, 
-                fim_{etapa_key}=?, 
+                tempo_{etapa_key}_sec=:t, 
+                fim_{etapa_key}=:fim, 
                 estado_relogio='parado', 
                 timestamp_ultimo_inicio='',
-                status_projeto=?
-            WHERE id=?
-        ''', (novo_tempo, now_str, proxima_etapa, torre_id))
-        conn.commit()
+                status_projeto=:prox
+            WHERE id=:id
+        '''), {"t": novo_tempo, "fim": now_str, "prox": proxima_etapa, "id": torre_id})
     st.cache_data.clear()
 
 def acao_retroceder_etapa(torre_id, etapa_atual):
@@ -355,26 +348,24 @@ def acao_retroceder_etapa(torre_id, etapa_atual):
         return
     etapa_anterior = anterior_map[etapa_atual]
     etapa_anterior_key = etapa_anterior.lower()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f'''
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text(f'''
             UPDATE torres SET 
-                status_projeto=?, 
+                status_projeto=:ant, 
                 fim_{etapa_anterior_key}='',
                 estado_relogio='parado',
                 timestamp_ultimo_inicio=''
-            WHERE id=?
-        ''', (etapa_anterior, torre_id))
-        conn.commit()
+            WHERE id=:id
+        '''), {"ant": etapa_anterior, "id": torre_id})
     st.cache_data.clear()
 
 def acao_cancelar_projeto(torre_id, etapa_atual):
     etapa_key = etapa_atual.lower() if etapa_atual.lower() in ['projeto', 'steel', 'sankhya'] else 'projeto'
     now_br = agora_br()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
-        res = cursor.fetchone()
+    engine = get_engine()
+    with engine.begin() as conn:
+        res = conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=:id"), {"id": torre_id}).fetchone()
         novo_tempo = res[0] or 0 if res else 0
         
         if res and res[2] == 'rodando' and res[1]:
@@ -386,47 +377,49 @@ def acao_cancelar_projeto(torre_id, etapa_atual):
             except Exception:
                 pass
         
-        cursor.execute(f'''
+        conn.execute(text(f'''
             UPDATE torres SET 
-                tempo_{etapa_key}_sec=?, 
+                tempo_{etapa_key}_sec=:t, 
                 estado_relogio='parado', 
                 timestamp_ultimo_inicio='',
                 status_projeto='Cancelado'
-            WHERE id=?
-        ''', (novo_tempo, torre_id))
-        conn.commit()
+            WHERE id=:id
+        '''), {"t": novo_tempo, "id": torre_id})
     st.cache_data.clear()
 
 def excluir_torre(torre_id):
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM torres WHERE id=?", (torre_id,))
-        conn.commit()
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM torres WHERE id=:id"), {"id": torre_id})
     st.cache_data.clear()
 
 def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes):
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text('''
             UPDATE torres SET 
-                acionamento=?, projeto=?, revisao=?, tipo=?, finalidade=?, peso=?, 
-                site_1=?, site_2=?, num_serie=?, local=?, elemento=?, cliente=?, 
-                responsavel=?, data=?, prazo=?, observacoes=?
-            WHERE id=?
-        ''', (acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes, torre_id))
-        conn.commit()
+                acionamento=:ac, projeto=:proj, revisao=:rev, tipo=:tipo, finalidade=:fin, peso=:peso, 
+                site_1=:s1, site_2=:s2, num_serie=:ns, local=:loc, elemento=:el, cliente=:cli, 
+                responsavel=:resp, data=:dt, prazo=:prz, observacoes=:obs
+            WHERE id=:id
+        '''), {
+            "ac": acionamento, "proj": projeto, "rev": revisao, "tipo": tipo, "fin": finalidade, "peso": peso,
+            "s1": site_1, "s2": site_2, "ns": num_serie, "loc": local, "el": elemento, "cli": cliente,
+            "resp": responsavel, "dt": data_cad, "prz": prazo, "obs": observacoes, "id": torre_id
+        })
     st.cache_data.clear()
 
 def autenticar_usuario(username, password):
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT nome FROM usuarios WHERE username = ? AND password_hash = ?", (username, hash_password(password)))
-        return cursor.fetchone()
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT nome FROM usuarios WHERE username = :u AND password_hash = :p"),
+                           {"u": username, "p": hash_password(password)}).fetchone()
+        return res
 
 @st.cache_data(ttl=3)
 def carregar_dados():
-    with get_connection() as conn:
-        return pd.read_sql("SELECT * FROM torres", conn)
+    engine = get_engine()
+    return pd.read_sql("SELECT * FROM torres", con=engine)
 
 # --- TELA DE LOGIN E SESSÃO ---
 if "autenticado" not in st.session_state:
@@ -480,8 +473,8 @@ with col_b1:
                 df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
                 
                 registros_inseridos = 0
-                with get_connection() as conn:
-                    cursor = conn.cursor()
+                engine = get_engine()
+                with engine.begin() as conn:
                     for _, row in df_imp.iterrows():
                         row_dict = row.to_dict()
                         
@@ -511,21 +504,20 @@ with col_b1:
                         prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
                         observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
 
-                        cursor.execute('''
+                        conn.execute(text('''
                             INSERT INTO torres (
                                 acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
                                 site_1, site_2, num_serie, local, elemento, responsavel, prazo,
                                 data, observacoes, status_projeto
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (
-                            acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
-                            site_1, site_2, num_serie, local, elemento, responsavel, prazo,
-                            agora_br().strftime("%d/%m/%Y"), observacoes
-                        ))
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :el, :resp, :prz, :dt, :obs, 'Projeto')
+                        '''), {
+                            "ac": acionamento, "proj": projeto, "rev": revisao, "cli": cliente, "tipo": tipo, "fin": finalidade, "peso": peso,
+                            "s1": site_1, "s2": site_2, "ns": num_serie, "loc": local, "el": elemento, "resp": responsavel, "prz": prazo,
+                            "dt": agora_br().strftime("%d/%m/%Y"), "obs": observacoes
+                        })
                         registros_inseridos += 1
 
-                    conn.commit()
                 st.cache_data.clear()
                 st.success(f"{registros_inseridos} registros importados com sucesso!")
                 st.rerun()
@@ -574,13 +566,16 @@ with col_b2:
                 f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
                 f_elemento_final = f_elemento_novo.strip() if f_elemento_novo.strip() else f_elemento_existente
                 if f_acionamento and f_projeto:
-                    with get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''
+                    engine = get_engine()
+                    with engine.begin() as conn:
+                        conn.execute(text('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
-                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento_final, f_responsavel, f_prazo.strftime("%d/%m/%Y"), f_data_cad.strftime("%d/%m/%Y"), f_observacoes))
-                        conn.commit()
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :el, :resp, :prz, :dt, :obs, 'Projeto')
+                        '''), {
+                            "ac": f_acionamento, "proj": f_projeto, "rev": f_revisao, "cli": f_cliente, "tipo": f_tipo, "fin": f_finalidade, "peso": f_peso,
+                            "s1": f_site1, "s2": f_site2, "ns": f_num_serie, "loc": f_local_final, "el": f_elemento_final, "resp": f_responsavel,
+                            "prz": f_prazo.strftime("%d/%m/%Y"), "dt": f_data_cad.strftime("%d/%m/%Y"), "obs": f_observacoes
+                        })
                     st.cache_data.clear()
                     st.success("Projeto cadastrado!")
                     st.rerun()
@@ -880,7 +875,6 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
-                        # Card em 2 colunas e 2 linhas (compacto)
                         c_info1, c_info2 = st.columns(2)
                         with c_info1:
                             st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>⚡ <b>Acion:</b> {item['acionamento']}</div>", unsafe_allow_html=True)
@@ -1141,7 +1135,6 @@ with aba_usuarios:
     
     tab_u_sub1, tab_u_sub2, tab_u_sub3 = st.tabs(["👤 Usuários", "🏢 Clientes", "👷 Responsáveis"])
     
-    # GERENCIAMENTO DE USUÁRIOS
     with tab_u_sub1:
         col_u1, col_u2 = st.columns([1, 1])
         with col_u1:
@@ -1153,20 +1146,20 @@ with aba_usuarios:
                 if st.form_submit_button("Cadastrar Usuário", use_container_width=True):
                     if novo_username and novo_nome and nova_senha:
                         try:
-                            with get_connection() as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
-                                               (novo_username, hash_password(nova_senha), novo_nome))
-                                conn.commit()
+                            engine = get_engine()
+                            with engine.begin() as conn:
+                                conn.execute(text("INSERT INTO usuarios (username, password_hash, nome) VALUES (:u, :p, :n)"),
+                                             {"u": novo_username, "p": hash_password(nova_senha), "n": novo_nome})
                             st.success(f"Usuário '{novo_username}' cadastrado!")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except Exception:
                             st.error("Erro: Nome de usuário já existe!")
 
         with col_u2:
             st.markdown("### 📋 Usuários Cadastrados (Editar / Excluir)")
-            with get_connection() as conn:
-                df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", conn)
+            engine = get_engine()
+            with engine.connect() as conn:
+                df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", con=conn)
             
             if not df_users.empty:
                 for _, u_row in df_users.iterrows():
@@ -1180,29 +1173,26 @@ with aba_usuarios:
                                     eu_user = st.text_input("Login", value=u_row['username'])
                                     eu_senha = st.text_input("Nova Senha (deixe em branco se não mudar)", type="password")
                                     if st.form_submit_button("Salvar"):
-                                        with get_connection() as conn:
-                                            cursor = conn.cursor()
+                                        engine_e = get_engine()
+                                        with engine_e.begin() as conn_e:
                                             if eu_senha.strip():
-                                                cursor.execute("UPDATE usuarios SET nome=?, username=?, password_hash=? WHERE id=?",
-                                                               (eu_nome, eu_user, hash_password(eu_senha), u_row['id']))
+                                                conn_e.execute(text("UPDATE usuarios SET nome=:n, username=:u, password_hash=:p WHERE id=:id"),
+                                                               {"n": eu_nome, "u": eu_user, "p": hash_password(eu_senha), "id": u_row['id']})
                                             else:
-                                                cursor.execute("UPDATE usuarios SET nome=?, username=? WHERE id=?",
-                                                               (eu_nome, eu_user, u_row['id']))
-                                            conn.commit()
+                                                conn_e.execute(text("UPDATE usuarios SET nome=:n, username=:u WHERE id=:id"),
+                                                               {"n": eu_nome, "u": eu_user, "id": u_row['id']})
                                         st.success("Atualizado!")
                                         st.rerun()
                         with uc2:
                             with st.popover("🗑️ Excluir", use_container_width=True):
                                 st.warning("Excluir usuário?")
                                 if st.button("Sim, Excluir", key=f"del_u_{u_row['id']}"):
-                                    with get_connection() as conn:
-                                        cursor = conn.cursor()
-                                        cursor.execute("DELETE FROM usuarios WHERE id=?", (u_row['id'],))
-                                        conn.commit()
+                                    engine_d = get_engine()
+                                    with engine_d.begin() as conn_d:
+                                        conn_d.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": u_row['id']})
                                     st.success("Removido!")
                                     st.rerun()
 
-    # GERENCIAMENTO DE CLIENTES
     with tab_u_sub2:
         col_c_add, col_c_list = st.columns([1, 1])
         with col_c_add:
@@ -1212,19 +1202,19 @@ with aba_usuarios:
                 if st.form_submit_button("Adicionar Cliente", use_container_width=True):
                     if novo_cli_nome.strip():
                         try:
-                            with get_connection() as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("INSERT INTO clientes (nome) VALUES (?)", (novo_cli_nome.strip(),))
-                                conn.commit()
+                            engine = get_engine()
+                            with engine.begin() as conn:
+                                conn.execute(text("INSERT INTO clientes (nome) VALUES (:nome)"), {"nome": novo_cli_nome.strip()})
                             st.success("Cliente adicionado!")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except Exception:
                             st.error("Cliente já cadastrado!")
 
         with col_c_list:
             st.markdown("### 📋 Clientes Cadastrados (Editar / Excluir)")
-            with get_connection() as conn:
-                df_cli = pd.read_sql("SELECT id, nome FROM clientes ORDER BY nome", conn)
+            engine = get_engine()
+            with engine.connect() as conn:
+                df_cli = pd.read_sql("SELECT id, nome FROM clientes ORDER BY nome", con=conn)
             
             for _, c_row in df_cli.iterrows():
                 with st.container(border=True):
@@ -1234,25 +1224,22 @@ with aba_usuarios:
                             with st.form(f"edt_cli_{c_row['id']}"):
                                 n_cli_edit = st.text_input("Nome", value=c_row['nome'])
                                 if st.form_submit_button("Salvar"):
-                                    with get_connection() as conn:
-                                        cursor = conn.cursor()
-                                        cursor.execute("UPDATE clientes SET nome=? WHERE id=?", (n_cli_edit, c_row['id']))
-                                        conn.commit()
+                                    engine_ec = get_engine()
+                                    with engine_ec.begin() as conn_ec:
+                                        conn_ec.execute(text("UPDATE clientes SET nome=:n WHERE id=:id"), {"n": n_cli_edit, "id": c_row['id']})
                                     st.success("Atualizado!")
                                     st.rerun()
                     with cc2:
                         with st.popover("🗑️ Excluir", use_container_width=True):
                             st.warning("Excluir cliente?")
                             if st.button("Sim, Excluir", key=f"del_cli_{c_row['id']}"):
-                                with get_connection() as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM clientes WHERE id=?", (c_row['id'],))
-                                    conn.commit()
+                                engine_dc = get_engine()
+                                with engine_dc.begin() as conn_dc:
+                                    conn_dc.execute(text("DELETE FROM clientes WHERE id=:id"), {"id": c_row['id']})
                                 st.success("Removido!")
                                 st.rerun()
                     st.write(f"**{c_row['nome']}**")
 
-    # GERENCIAMENTO DE RESPONSÁVEIS
     with tab_u_sub3:
         col_r_add, col_r_list = st.columns([1, 1])
         with col_r_add:
@@ -1262,19 +1249,19 @@ with aba_usuarios:
                 if st.form_submit_button("Adicionar Responsável", use_container_width=True):
                     if novo_resp_nome.strip():
                         try:
-                            with get_connection() as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("INSERT INTO responsaveis (nome) VALUES (?)", (novo_resp_nome.strip(),))
-                                conn.commit()
+                            engine = get_engine()
+                            with engine.begin() as conn:
+                                conn.execute(text("INSERT INTO responsaveis (nome) VALUES (:nome)"), {"nome": novo_resp_nome.strip()})
                             st.success("Responsável adicionado!")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except Exception:
                             st.error("Responsável já cadastrado!")
 
         with col_r_list:
             st.markdown("### 📋 Responsáveis Cadastrados (Editar / Excluir)")
-            with get_connection() as conn:
-                df_resp = pd.read_sql("SELECT id, nome FROM responsaveis ORDER BY nome", conn)
+            engine = get_engine()
+            with engine.connect() as conn:
+                df_resp = pd.read_sql("SELECT id, nome FROM responsaveis ORDER BY nome", con=conn)
             
             for _, r_row in df_resp.iterrows():
                 with st.container(border=True):
@@ -1284,20 +1271,18 @@ with aba_usuarios:
                             with st.form(f"edt_resp_{r_row['id']}"):
                                 n_resp_edit = st.text_input("Nome", value=r_row['nome'])
                                 if st.form_submit_button("Salvar"):
-                                    with get_connection() as conn:
-                                        cursor = conn.cursor()
-                                        cursor.execute("UPDATE responsaveis SET nome=? WHERE id=?", (n_resp_edit, r_row['id']))
-                                        conn.commit()
+                                    engine_er = get_engine()
+                                    with engine_er.begin() as conn_er:
+                                        conn_er.execute(text("UPDATE responsaveis SET nome=:n WHERE id=:id"), {"n": n_resp_edit, "id": r_row['id']})
                                     st.success("Atualizado!")
                                     st.rerun()
                     with rc2:
                         with st.popover("🗑️ Excluir", use_container_width=True):
                             st.warning("Excluir responsável?")
                             if st.button("Sim, Excluir", key=f"del_resp_{r_row['id']}"):
-                                with get_connection() as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM responsaveis WHERE id=?", (r_row['id'],))
-                                    conn.commit()
+                                engine_dr = get_engine()
+                                with engine_dr.begin() as conn_dr:
+                                    conn_dr.execute(text("DELETE FROM responsaveis WHERE id=:id"), {"id": r_row['id']})
                                 st.success("Removido!")
                                 st.rerun()
                     st.write(f"**{r_row['nome']}**")
