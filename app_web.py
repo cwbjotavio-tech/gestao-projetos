@@ -12,17 +12,24 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# INICIALIZAÇÃO DO BANCO DE DADOS
+# INICIALIZAÇÃO DO BANCO DE DADOS COM TRATAMENTO SEGURO
 # ---------------------------------------------------------
-def init_db():
+@st.cache_resource
+def init_connection():
     try:
-        # Lê a URL configurada nos Secrets do Streamlit Cloud
         database_url = st.secrets["DATABASE_URL"]
-        
-        # Cria o engine do SQLAlchemy
         engine = create_engine(database_url)
         
-        # Garante a criação das tabelas essenciais no Supabase
+        # Testa a conexão executando um comando simples
+        with engine.begin() as conn:
+            conn.execute(text("SELECT 1;"))
+            
+        return engine
+    except Exception as e:
+        return None
+
+def create_tables(engine):
+    try:
         with engine.begin() as conn:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS projetos (
@@ -57,20 +64,27 @@ def init_db():
                     perfil VARCHAR(50)
                 );
             """))
-            
-        return engine
     except Exception as e:
-        st.error(f"Erro crítico ao inicializar o banco de dados: {e}")
-        return None
+        st.error(f"Erro ao criar tabelas no banco de dados: {e}")
 
 # ---------------------------------------------------------
 # FLUXO PRINCIPAL DA APLICAÇÃO
 # ---------------------------------------------------------
 def main():
-    engine = init_db()
+    engine = init_connection()
     
     if engine is None:
-        st.stop("Não foi possível prosseguir sem a conexão com o banco de dados. Verifique a URL nos Secrets e reinicie o app.")
+        st.error("⚠️ **Não foi possível conectar ao Supabase.**")
+        st.info(
+            "Verifique se:\n"
+            "1. A URL do Pooler nos Secrets do Streamlit Cloud está correta.\n"
+            "2. A senha (`baseprojetos`) está correta.\n"
+            "3. O parâmetro `?sslmode=require` foi incluído no final."
+        )
+        return
+
+    # Se conectou com sucesso, garante que as tabelas existem
+    create_tables(engine)
 
     st.title("🏗️ Sistema de Gestão de Projetos e Torres")
     
@@ -191,7 +205,7 @@ def main():
                             text("INSERT INTO usuarios (nome, email, perfil) VALUES (:n, :e, :p)"),
                             {"n": nome_usuario, "e": email_usuario, "p": perfil}
                         )
-                    st.success("Usuário salvo com sucesso!")
+                    st.success("Salvo com sucesso!")
                 except Exception as e:
                     st.error(f"Erro ao salvar usuário: {e}")
 
