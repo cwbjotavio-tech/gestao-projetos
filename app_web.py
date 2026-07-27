@@ -2,7 +2,9 @@ import streamlit as st
 from sqlalchemy import create_engine, text
 import pandas as pd
 
-# Configuração da página
+# ---------------------------------------------------------
+# CONFIGURAÇÃO DA PÁGINA
+# ---------------------------------------------------------
 st.set_page_config(
     page_title="Gestão de Projetos e Torres",
     page_icon="🏗️",
@@ -62,17 +64,17 @@ def init_db():
         return None
 
 # ---------------------------------------------------------
-# FLUXO PRINCIPAL
+# FLUXO PRINCIPAL DA APLICAÇÃO
 # ---------------------------------------------------------
 def main():
     engine = init_db()
     
     if engine is None:
-        st.stop("Não foi possível prosseguir sem a conexão com o banco de dados.")
+        st.stop("Não foi possível prosseguir sem a conexão com o banco de dados. Verifique a URL nos Secrets e reinicie o app.")
 
     st.title("🏗️ Sistema de Gestão de Projetos e Torres")
     
-    # Menu lateral
+    # Menu lateral de navegação
     menu = st.sidebar.selectbox(
         "Navegação", 
         ["Dashboard", "Gerenciar Projetos", "Controle de Torres", "Usuários e Clientes"]
@@ -92,8 +94,8 @@ def main():
                     st.dataframe(df_projetos, use_container_width=True)
                 else:
                     st.info("Nenhum projeto cadastrado.")
-            except Exception as e:
-                st.warning("Tabela de projetos ainda vazia ou em criação.")
+            except Exception:
+                st.warning("Tabela de projetos vazia.")
 
         with col2:
             st.subheader("Torres Cadastradas")
@@ -103,8 +105,8 @@ def main():
                     st.dataframe(df_torres, use_container_width=True)
                 else:
                     st.info("Nenhuma torre cadastrada.")
-            except Exception as e:
-                st.warning("Tabela de torres ainda vazia ou em criação.")
+            except Exception:
+                st.warning("Tabela de torres vazia.")
 
     elif menu == "Gerenciar Projetos":
         st.header("📁 Cadastro e Edição de Projetos")
