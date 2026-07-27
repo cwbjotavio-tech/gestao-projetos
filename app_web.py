@@ -551,7 +551,7 @@ with col_b2:
                 f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
 
             with col_fc2:
-                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo", "Cálculo"])
                 f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
                 f_site1 = st.text_input("Site I")
                 f_site2 = st.text_input("Site II")
