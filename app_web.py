@@ -1,10 +1,21 @@
+import hashlib
 import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from supabase import create_client, Client
+from sqlalchemy import create_engine, text
+
+# Lê a URL do Supabase configurada nos Secrets do Streamlit Cloud
+if "DATABASE_URL" in st.secrets:
+    DATABASE_URL = st.secrets["DATABASE_URL"]
+else:
+    # Fallback opcional caso queira testar localmente sem secrets
+    DATABASE_URL = "sqlite:///gestao_torres.db"
+
+# Cria o engine do SQLAlchemy compatível com PostgreSQL e o Supabase
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # Fuso horário do Brasil
 TZ_BR = ZoneInfo("America/Sao_Paulo")
