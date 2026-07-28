@@ -5,17 +5,6 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from sqlalchemy import create_engine, text
-
-# Lê a URL do Supabase configurada nos Secrets do Streamlit Cloud
-if "DATABASE_URL" in st.secrets:
-    DATABASE_URL = st.secrets["DATABASE_URL"]
-else:
-    # Fallback opcional caso queira testar localmente sem secrets
-    DATABASE_URL = "sqlite:///gestao_torres.db"
-
-# Cria o engine do SQLAlchemy compatível com PostgreSQL e o Supabase
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # Fuso horário do Brasil
 TZ_BR = ZoneInfo("America/Sao_Paulo")
@@ -138,46 +127,126 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO COM O SUPABASE E SEGURANÇA ---
-@st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+# --- BANCO DE DADOS E SEGURANÇA ---
+from sqlalchemy import create_engine, text
 
-supabase = init_supabase()
+if "DATABASE_URL" in st.secrets:
+    DATABASE_URL = st.secrets["DATABASE_URL"]
+else:
+    DATABASE_URL = "sqlite:///gestao_torres.db"
 
-import hashlib
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    future=True
+)
+
+def get_connection():
+    return engine.connect()
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
+def init_db():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                nome TEXT NOT NULL
+            )
+        ''')
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS clientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL
+            )
+        ''')
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS responsaveis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL
+            )
+        ''')
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS torres (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                acionamento TEXT,
+                projeto TEXT,
+                revisao TEXT DEFAULT '00',
+                tipo TEXT DEFAULT 'Torre',
+                finalidade TEXT DEFAULT 'Fabricação',
+                peso REAL DEFAULT 0.0,
+                site_1 TEXT DEFAULT '',
+                site_2 TEXT DEFAULT '',
+                num_serie TEXT DEFAULT '',
+                local TEXT DEFAULT '',
+                elemento TEXT DEFAULT '',
+                cliente TEXT,
+                responsavel TEXT,
+                data TEXT,
+                prazo TEXT,
+                status_projeto TEXT DEFAULT 'Projeto',
+                observacoes TEXT DEFAULT '',
+                estado_relogio TEXT DEFAULT 'parado',
+                timestamp_ultimo_inicio TEXT DEFAULT '',
+                tempo_projeto_sec INTEGER DEFAULT 0,
+                inicio_projeto TEXT DEFAULT '',
+                fim_projeto TEXT DEFAULT '',
+                tempo_steel_sec INTEGER DEFAULT 0,
+                inicio_steel TEXT DEFAULT '',
+                fim_steel TEXT DEFAULT '',
+                tempo_sankhya_sec INTEGER DEFAULT 0,
+                inicio_sankhya TEXT DEFAULT '',
+                fim_sankhya TEXT DEFAULT ''
+            )
+        ''')
+        
+        # Seeds padrão se tabelas estiverem vazias
+        conn.execute(text("SELECT COUNT(*) FROM usuarios")
+        if cursor.fetchone()[0] == 0:
+            conn.execute(text("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)", ("admin", hash_password("admin123"), "Administrador"))
+        
+        conn.execute(text("SELECT COUNT(*) FROM clientes")
+        if cursor.fetchone()[0] == 0:
+            for cli in ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"]:
+                conn.execute(text("INSERT OR IGNORE INTO clientes (nome) VALUES (?)", (cli,))
+
+        conn.execute(text("SELECT COUNT(*) FROM responsaveis")
+        if cursor.fetchone()[0] == 0:
+            for resp in ["Ark Steel", "Support", "Towertec"]:
+                conn.execute(text("INSERT OR IGNORE INTO responsaveis (nome) VALUES (?)", (resp,))
+
+        conn.commit()
+
+init_db()
+
 # --- FUNÇÕES UTILITÁRIAS ---
 def obter_locais_cadastrados():
-    res = supabase.table("torres").select("local").execute()
-    if res.data:
-        locais = sorted(list(set(row["local"] for row in res.data if row.get("local"))))
-        return locais
-    return []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local")
+        return [row[0] for row in cursor.fetchall()]
 
 def obter_elementos_cadastrados():
-    res = supabase.table("torres").select("elemento").execute()
-    if res.data:
-        elementos = sorted(list(set(row["elemento"] for row in res.data if row.get("elemento"))))
-        return elementos
-    return []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text("SELECT DISTINCT elemento FROM torres WHERE elemento IS NOT NULL AND elemento != '' ORDER BY elemento")
+        return [row[0] for row in cursor.fetchall()]
 
 def obter_clientes():
-    res = supabase.table("clientes").select("nome").order("nome").execute()
-    if res.data:
-        return [row["nome"] for row in res.data]
-    return ["BTC", "Del Infra", "Phoenix", "Global", "Reflay", "Winity", "Nexus", "Centennial"]
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text("SELECT nome FROM clientes ORDER BY nome")
+        return [row[0] for row in cursor.fetchall()]
 
 def obter_responsaveis():
-    res = supabase.table("responsaveis").select("nome").order("nome").execute()
-    if res.data:
-        return [row["nome"] for row in res.data]
-    return ["Ark Steel", "Support", "Towertec"]
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text("SELECT nome FROM responsaveis ORDER BY nome")
+        return [row[0] for row in cursor.fetchall()]
 
 def classificar_situacao(row):
     if row['status_projeto'] == 'Concluído':
@@ -203,7 +272,7 @@ def obter_tempo_decorrido_etapa(item, etapa_key):
         return 0
     
     sec = item[coluna] or 0
-    if item['status_projeto'].lower() == etapa_key and item['estado_relogio'] == 'rodando' and item.get('timestamp_ultimo_inicio'):
+    if item['status_projeto'].lower() == etapa_key and item['estado_relogio'] == 'rodando' and item['timestamp_ultimo_inicio']:
         try:
             dt_inicio = datetime.fromisoformat(item['timestamp_ultimo_inicio'])
             if dt_inicio.tzinfo is None:
@@ -227,65 +296,64 @@ def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
     now_str = now_br.strftime("%d/%m/%Y %H:%M")
-    
-    res = supabase.table("torres").select(f"inicio_{etapa_key}").eq("id", torre_id).execute()
-    update_data = {"estado_relogio": "rodando", "timestamp_ultimo_inicio": now_iso}
-    if res.data and not res.data[0].get(f"inicio_{etapa_key}"):
-        update_data[f"inicio_{etapa_key}"] = now_str
-        
-    supabase.table("torres").update(update_data).eq("id", torre_id).execute()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text(f"SELECT inicio_{etapa_key} FROM torres WHERE id=?", (torre_id,))
+        res = cursor.fetchone()
+        if not res or not res[0]:
+            conn.execute(text(f"UPDATE torres SET inicio_{etapa_key}=? WHERE id=?", (now_str, torre_id))
+        conn.execute(text("UPDATE torres SET estado_relogio='rodando', timestamp_ultimo_inicio=? WHERE id=?", (now_iso, torre_id))
+        conn.commit()
     st.cache_data.clear()
 
 def acao_pausar_relogio(torre_id, etapa_key):
     now_br = agora_br()
-    res = supabase.table("torres").select(f"tempo_{etapa_key}_sec, timestamp_ultimo_inicio").eq("id", torre_id).execute()
-    if res.data:
-        row = res.data[0]
-        tempo_atual = row.get(f"tempo_{etapa_key}_sec") or 0
-        timestamp_inicio = row.get("timestamp_ultimo_inicio")
-        elapsed = 0
-        if timestamp_inicio:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio FROM torres WHERE id=?", (torre_id,))
+        res = cursor.fetchone()
+        if res and res[1]:
             try:
-                dt_inicio = datetime.fromisoformat(timestamp_inicio)
+                dt_inicio = datetime.fromisoformat(res[1])
                 if dt_inicio.tzinfo is None:
                     dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
                 elapsed = max(0, int((now_br - dt_inicio).total_seconds()))
             except Exception:
                 elapsed = 0
-        novo_tempo = tempo_atual + elapsed
-        supabase.table("torres").update({
-            f"tempo_{etapa_key}_sec": novo_tempo,
-            "estado_relogio": "parado",
-            "timestamp_ultimo_inicio": ""
-        }).eq("id", torre_id).execute()
+            novo_tempo = (res[0] or 0) + elapsed
+            conn.execute(text(f"UPDATE torres SET tempo_{etapa_key}_sec=?, estado_relogio='parado', timestamp_ultimo_inicio='' WHERE id=?", (novo_tempo, torre_id))
+            conn.commit()
     st.cache_data.clear()
 
 def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
     etapa_key = etapa_atual.lower()
     now_br = agora_br()
     now_str = now_br.strftime("%d/%m/%Y %H:%M")
-    
-    res = supabase.table("torres").select(f"tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio").eq("id", torre_id).execute()
-    novo_tempo = 0
-    if res.data:
-        row = res.data[0]
-        novo_tempo = row.get(f"tempo_{etapa_key}_sec") or 0
-        if row.get("estado_relogio") == 'rodando' and row.get("timestamp_ultimo_inicio"):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
+        res = cursor.fetchone()
+        novo_tempo = res[0] or 0 if res else 0
+        
+        if res and res[2] == 'rodando' and res[1]:
             try:
-                dt_inicio = datetime.fromisoformat(row["timestamp_ultimo_inicio"])
+                dt_inicio = datetime.fromisoformat(res[1])
                 if dt_inicio.tzinfo is None:
                     dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
                 novo_tempo += max(0, int((now_br - dt_inicio).total_seconds()))
             except Exception:
                 pass
         
-    supabase.table("torres").update({
-        f"tempo_{etapa_key}_sec": novo_tempo,
-        f"fim_{etapa_key}": now_str,
-        "estado_relogio": 'parado',
-        "timestamp_ultimo_inicio": '',
-        "status_projeto": proxima_etapa
-    }).eq("id", torre_id).execute()
+        conn.execute(text(f'''
+            UPDATE torres SET 
+                tempo_{etapa_key}_sec=?, 
+                fim_{etapa_key}=?, 
+                estado_relogio='parado', 
+                timestamp_ultimo_inicio='',
+                status_projeto=?
+            WHERE id=?
+        ''', (novo_tempo, now_str, proxima_etapa, torre_id))
+        conn.commit()
     st.cache_data.clear()
 
 def acao_retroceder_etapa(torre_id, etapa_atual):
@@ -299,75 +367,92 @@ def acao_retroceder_etapa(torre_id, etapa_atual):
         return
     etapa_anterior = anterior_map[etapa_atual]
     etapa_anterior_key = etapa_anterior.lower()
-    
-    supabase.table("torres").update({
-        "status_projeto": etapa_anterior,
-        f"fim_{etapa_anterior_key}": '',
-        "estado_relogio": 'parado',
-        "timestamp_ultimo_inicio": ''
-    }).eq("id", torre_id).execute()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text(f'''
+            UPDATE torres SET 
+                status_projeto=?, 
+                fim_{etapa_anterior_key}='',
+                estado_relogio='parado',
+                timestamp_ultimo_inicio=''
+            WHERE id=?
+        ''', (etapa_anterior, torre_id))
+        conn.commit()
     st.cache_data.clear()
 
 def acao_cancelar_projeto(torre_id, etapa_atual):
     etapa_key = etapa_atual.lower() if etapa_atual.lower() in ['projeto', 'steel', 'sankhya'] else 'projeto'
     now_br = agora_br()
-    res = supabase.table("torres").select(f"tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio").eq("id", torre_id).execute()
-    novo_tempo = 0
-    if res.data:
-        row = res.data[0]
-        novo_tempo = row.get(f"tempo_{etapa_key}_sec") or 0
-        if row.get("estado_relogio") == 'rodando' and row.get("timestamp_ultimo_inicio"):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(text(f"SELECT tempo_{etapa_key}_sec, timestamp_ultimo_inicio, estado_relogio FROM torres WHERE id=?", (torre_id,))
+        res = cursor.fetchone()
+        novo_tempo = res[0] or 0 if res else 0
+        
+        if res and res[2] == 'rodando' and res[1]:
             try:
-                dt_inicio = datetime.fromisoformat(row["timestamp_ultimo_inicio"])
+                dt_inicio = datetime.fromisoformat(res[1])
                 if dt_inicio.tzinfo is None:
                     dt_inicio = dt_inicio.replace(tzinfo=TZ_BR)
                 novo_tempo += max(0, int((now_br - dt_inicio).total_seconds()))
             except Exception:
                 pass
         
-    supabase.table("torres").update({
-        f"tempo_{etapa_key}_sec": novo_tempo,
-        "estado_relogio": 'parado',
-        "timestamp_ultimo_inicio": '',
-        "status_projeto": 'Cancelado'
-    }).eq("id", torre_id).execute()
+        conn.execute(text(f'''
+            UPDATE torres SET 
+                tempo_{etapa_key}_sec=?, 
+                estado_relogio='parado', 
+                timestamp_ultimo_inicio='',
+                status_projeto='Cancelado'
+            WHERE id=?
+        ''', (novo_tempo, torre_id))
+        conn.commit()
     st.cache_data.clear()
 
 def excluir_torre(torre_id):
-    supabase.table("torres").delete().eq("id", torre_id).execute()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        conn.execute(
+    text("DELETE FROM torres WHERE id=:id"),
+    {"id": torre_id}
+)
+        conn.commit()
     st.cache_data.clear()
 
 def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes):
-    supabase.table("torres").update({
-        "acionamento": acionamento,
-        "projeto": projeto,
-        "revisao": revisao,
-        "tipo": tipo,
-        "finalidade": finalidade,
-        "peso": peso,
-        "site_1": site_1,
-        "site_2": site_2,
-        "num_serie": num_serie,
-        "local": local,
-        "elemento": elemento,
-        "cliente": cliente,
-        "responsavel": responsavel,
-        "data": data_cad,
-        "prazo": prazo,
-        "observacoes": observacoes
-    }).eq("id", torre_id).execute()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+       conn.execute(text('''
+            UPDATE torres SET 
+                acionamento=?, projeto=?, revisao=?, tipo=?, finalidade=?, peso=?, 
+                site_1=?, site_2=?, num_serie=?, local=?, elemento=?, cliente=?, 
+                responsavel=?, data=?, prazo=?, observacoes=?
+            WHERE id=?
+        ''', (acionamento, projeto, revisao, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, cliente, responsavel, data_cad, prazo, observacoes, torre_id))
+        conn.commit()
     st.cache_data.clear()
 
 def autenticar_usuario(username, password):
-    res = supabase.table("usuarios").select("nome").eq("username", username).eq("password_hash", hash_password(password)).execute()
-    if res.data:
-        return [res.data[0]["nome"]]
-    return None
+    with engine.connect() as conn:
+        resultado = conn.execute(
+            text("""
+                SELECT nome
+                FROM usuarios
+                WHERE username=:username
+                AND password_hash=:senha
+            """),
+            {
+                "username": username,
+                "senha": hash_password(password)
+            }
+        ).fetchone()
+
+        return resultado
 
 @st.cache_data(ttl=3)
 def carregar_dados():
-    res = supabase.table("torres").select("*").execute()
-    return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    with get_connection() as conn:
+        return pd.read_sql("SELECT * FROM torres", conn)
 
 # --- TELA DE LOGIN E SESSÃO ---
 if "autenticado" not in st.session_state:
@@ -421,56 +506,52 @@ with col_b1:
                 df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
                 
                 registros_inseridos = 0
-                for _, row in df_imp.iterrows():
-                    row_dict = row.to_dict()
-                    
-                    acionamento = obter_valor_coluna(row_dict, ['acionamento', 'acionamento*'])
-                    projeto = obter_valor_coluna(row_dict, ['projeto', 'projeto*'])
-                    
-                    if not acionamento and not projeto:
-                        continue
+                with get_connection() as conn:
+                    cursor = conn.cursor()
+                    for _, row in df_imp.iterrows():
+                        row_dict = row.to_dict()
+                        
+                        acionamento = obter_valor_coluna(row_dict, ['acionamento', 'acionamento*'])
+                        projeto = obter_valor_coluna(row_dict, ['projeto', 'projeto*'])
+                        
+                        if not acionamento and not projeto:
+                            continue
 
-                    revisao = obter_valor_coluna(row_dict, ['revisão', 'revisao', 'rev'], '00')
-                    cliente = obter_valor_coluna(row_dict, ['cliente'], 'BTC')
-                    tipo = obter_valor_coluna(row_dict, ['tipo'], 'Torre')
-                    finalidade = obter_valor_coluna(row_dict, ['finalidade'], 'Fabricação')
-                    
-                    peso_raw = obter_valor_coluna(row_dict, ['peso (kg)', 'peso', 'peso_kg'], '0')
-                    try:
-                        peso = float(str(peso_raw).replace(',', '.'))
-                    except ValueError:
-                        peso = 0.0
+                        revisao = obter_valor_coluna(row_dict, ['revisão', 'revisao', 'rev'], '00')
+                        cliente = obter_valor_coluna(row_dict, ['cliente'], 'BTC')
+                        tipo = obter_valor_coluna(row_dict, ['tipo'], 'Torre')
+                        finalidade = obter_valor_coluna(row_dict, ['finalidade'], 'Fabricação')
+                        
+                        peso_raw = obter_valor_coluna(row_dict, ['peso (kg)', 'peso', 'peso_kg'], '0')
+                        try:
+                            peso = float(str(peso_raw).replace(',', '.'))
+                        except ValueError:
+                            peso = 0.0
 
-                    site_1 = obter_valor_coluna(row_dict, ['site i', 'site 1', 'site_1', 'site1'])
-                    site_2 = obter_valor_coluna(row_dict, ['site ii', 'site 2', 'site_2', 'site2'])
-                    num_serie = obter_valor_coluna(row_dict, ['nº. série', 'nº série', 'num serie', 'num_serie', 'série', 'serie'])
-                    local = obter_valor_coluna(row_dict, ['local'])
-                    elemento = obter_valor_coluna(row_dict, ['elemento'])
-                    responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
-                    prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
-                    observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
+                        site_1 = obter_valor_coluna(row_dict, ['site i', 'site 1', 'site_1', 'site1'])
+                        site_2 = obter_valor_coluna(row_dict, ['site ii', 'site 2', 'site_2', 'site2'])
+                        num_serie = obter_valor_coluna(row_dict, ['nº. série', 'nº série', 'num serie', 'num_serie', 'série', 'serie'])
+                        local = obter_valor_coluna(row_dict, ['local'])
+                        elemento = obter_valor_coluna(row_dict, ['elemento'])
+                        responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
+                        prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
+                        observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
 
-                    supabase.table("torres").insert({
-                        "acionamento": acionamento,
-                        "projeto": projeto,
-                        "revisao": revisao,
-                        "cliente": cliente,
-                        "tipo": tipo,
-                        "finalidade": finalidade,
-                        "peso": peso,
-                        "site_1": site_1,
-                        "site_2": site_2,
-                        "num_serie": num_serie,
-                        "local": local,
-                        "elemento": elemento,
-                        "responsavel": responsavel,
-                        "prazo": prazo,
-                        "data": agora_br().strftime("%d/%m/%Y"),
-                        "observacoes": observacoes,
-                        "status_projeto": "Projeto"
-                    }).execute()
-                    registros_inseridos += 1
+                        conn.execute(text('''
+                            INSERT INTO torres (
+                                acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                                site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                                data, observacoes, status_projeto
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
+                        ''', (
+                            acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                            site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                            agora_br().strftime("%d/%m/%Y"), observacoes
+                        ))
+                        registros_inseridos += 1
 
+                    conn.commit()
                 st.cache_data.clear()
                 st.success(f"{registros_inseridos} registros importados com sucesso!")
                 st.rerun()
@@ -519,25 +600,13 @@ with col_b2:
                 f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
                 f_elemento_final = f_elemento_novo.strip() if f_elemento_novo.strip() else f_elemento_existente
                 if f_acionamento and f_projeto:
-                    supabase.table("torres").insert({
-                        "acionamento": f_acionamento,
-                        "projeto": f_projeto,
-                        "revisao": f_revisao,
-                        "cliente": f_cliente,
-                        "tipo": f_tipo,
-                        "finalidade": f_finalidade,
-                        "peso": f_peso,
-                        "site_1": f_site1,
-                        "site_2": f_site2,
-                        "num_serie": f_num_serie,
-                        "local": f_local_final,
-                        "elemento": f_elemento_final,
-                        "responsavel": f_responsavel,
-                        "prazo": f_prazo.strftime("%d/%m/%Y"),
-                        "data": f_data_cad.strftime("%d/%m/%Y"),
-                        "observacoes": f_observacoes,
-                        "status_projeto": "Projeto"
-                    }).execute()
+                    with get_connection() as conn:
+                        cursor = conn.cursor()
+                        conn.execute(text('''
+                            INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso, site_1, site_2, num_serie, local, elemento, responsavel, prazo, data, observacoes, status_projeto)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Projeto')
+                        ''', (f_acionamento, f_projeto, f_revisao, f_cliente, f_tipo, f_finalidade, f_peso, f_site1, f_site2, f_num_serie, f_local_final, f_elemento_final, f_responsavel, f_prazo.strftime("%d/%m/%Y"), f_data_cad.strftime("%d/%m/%Y"), f_observacoes))
+                        conn.commit()
                     st.cache_data.clear()
                     st.success("Projeto cadastrado!")
                     st.rerun()
@@ -837,6 +906,7 @@ with aba_kanban:
                         site1_val = item['site_1'] if item['site_1'] else "-"
                         num_serie_val = item['num_serie'] if item['num_serie'] else "-"
 
+                        # Card em 2 colunas e 2 linhas (compacto)
                         c_info1, c_info2 = st.columns(2)
                         with c_info1:
                             st.markdown(f"<div style='font-size:13px; color:#cbd5e1; line-height:1.4;'>⚡ <b>Acion:</b> {item['acionamento']}</div>", unsafe_allow_html=True)
@@ -1109,20 +1179,20 @@ with aba_usuarios:
                 if st.form_submit_button("Cadastrar Usuário", use_container_width=True):
                     if novo_username and novo_nome and nova_senha:
                         try:
-                            supabase.table("usuarios").insert({
-                                "username": novo_username,
-                                "password_hash": hash_password(nova_senha),
-                                "nome": novo_nome
-                            }).execute()
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                conn.execute(text("INSERT INTO usuarios (username, password_hash, nome) VALUES (?, ?, ?)",
+                                               (novo_username, hash_password(nova_senha), novo_nome))
+                                conn.commit()
                             st.success(f"Usuário '{novo_username}' cadastrado!")
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+                        except sqlite3.IntegrityError:
+                            st.error("Erro: Nome de usuário já existe!")
 
         with col_u2:
             st.markdown("### 📋 Usuários Cadastrados (Editar / Excluir)")
-            res_users = supabase.table("usuarios").select("id, username, nome").execute()
-            df_users = pd.DataFrame(res_users.data) if res_users.data else pd.DataFrame()
+            with get_connection() as conn:
+                df_users = pd.read_sql("SELECT id, username, nome FROM usuarios", conn)
             
             if not df_users.empty:
                 for _, u_row in df_users.iterrows():
@@ -1136,17 +1206,25 @@ with aba_usuarios:
                                     eu_user = st.text_input("Login", value=u_row['username'])
                                     eu_senha = st.text_input("Nova Senha (deixe em branco se não mudar)", type="password")
                                     if st.form_submit_button("Salvar"):
-                                        update_dict = {"nome": eu_nome, "username": eu_user}
-                                        if eu_senha.strip():
-                                            update_dict["password_hash"] = hash_password(eu_senha)
-                                        supabase.table("usuarios").update(update_dict).eq("id", u_row['id']).execute()
+                                        with get_connection() as conn:
+                                            cursor = conn.cursor()
+                                            if eu_senha.strip():
+                                                conn.execute(text("UPDATE usuarios SET nome=?, username=?, password_hash=? WHERE id=?",
+                                                               (eu_nome, eu_user, hash_password(eu_senha), u_row['id']))
+                                            else:
+                                                conn.execute(text("UPDATE usuarios SET nome=?, username=? WHERE id=?",
+                                                               (eu_nome, eu_user, u_row['id']))
+                                            conn.commit()
                                         st.success("Atualizado!")
                                         st.rerun()
                         with uc2:
                             with st.popover("🗑️ Excluir", use_container_width=True):
                                 st.warning("Excluir usuário?")
                                 if st.button("Sim, Excluir", key=f"del_u_{u_row['id']}"):
-                                    supabase.table("usuarios").delete().eq("id", u_row['id']).execute()
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        conn.execute(text("DELETE FROM usuarios WHERE id=?", (u_row['id'],))
+                                        conn.commit()
                                     st.success("Removido!")
                                     st.rerun()
 
@@ -1160,37 +1238,45 @@ with aba_usuarios:
                 if st.form_submit_button("Adicionar Cliente", use_container_width=True):
                     if novo_cli_nome.strip():
                         try:
-                            supabase.table("clientes").insert({"nome": novo_cli_nome.strip()}).execute()
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                conn.execute(text("""INSERT INTO clientes(nome) VALUES (:nome) """), {"nome": nome}), (novo_cli_nome.strip(),))
+                                conn.commit()
                             st.success("Cliente adicionado!")
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+                        except sqlite3.IntegrityError:
+                            st.error("Cliente já cadastrado!")
 
         with col_c_list:
             st.markdown("### 📋 Clientes Cadastrados (Editar / Excluir)")
-            res_cli = supabase.table("clientes").select("id, nome").order("nome").execute()
-            df_cli = pd.DataFrame(res_cli.data) if res_cli.data else pd.DataFrame()
+            with get_connection() as conn:
+                df_cli = pd.read_sql("SELECT id, nome FROM clientes ORDER BY nome", conn)
             
-            if not df_cli.empty:
-                for _, c_row in df_cli.iterrows():
-                    with st.container(border=True):
-                        cc1, cc2 = st.columns(2)
-                        with cc1:
-                            with st.popover("✏️ Editar", use_container_width=True):
-                                with st.form(f"edt_cli_{c_row['id']}"):
-                                    n_cli_edit = st.text_input("Nome", value=c_row['nome'])
-                                    if st.form_submit_button("Salvar"):
-                                        supabase.table("clientes").update({"nome": n_cli_edit}).eq("id", c_row['id']).execute()
-                                        st.success("Atualizado!")
-                                        st.rerun()
-                        with cc2:
-                            with st.popover("🗑️ Excluir", use_container_width=True):
-                                st.warning("Excluir cliente?")
-                                if st.button("Sim, Excluir", key=f"del_cli_{c_row['id']}"):
-                                    supabase.table("clientes").delete().eq("id", c_row['id']).execute()
-                                    st.success("Removido!")
+            for _, c_row in df_cli.iterrows():
+                with st.container(border=True):
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        with st.popover("✏️ Editar", use_container_width=True):
+                            with st.form(f"edt_cli_{c_row['id']}"):
+                                n_cli_edit = st.text_input("Nome", value=c_row['nome'])
+                                if st.form_submit_button("Salvar"):
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        conn.execute(text("UPDATE clientes SET nome=? WHERE id=?", (n_cli_edit, c_row['id']))
+                                        conn.commit()
+                                    st.success("Atualizado!")
                                     st.rerun()
-                        st.write(f"**{c_row['nome']}**")
+                    with cc2:
+                        with st.popover("🗑️ Excluir", use_container_width=True):
+                            st.warning("Excluir cliente?")
+                            if st.button("Sim, Excluir", key=f"del_cli_{c_row['id']}"):
+                                with get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    conn.execute(text("DELETE FROM clientes WHERE id=?", (c_row['id'],))
+                                    conn.commit()
+                                st.success("Removido!")
+                                st.rerun()
+                    st.write(f"**{c_row['nome']}**")
 
     # GERENCIAMENTO DE RESPONSÁVEIS
     with tab_u_sub3:
@@ -1202,34 +1288,42 @@ with aba_usuarios:
                 if st.form_submit_button("Adicionar Responsável", use_container_width=True):
                     if novo_resp_nome.strip():
                         try:
-                            supabase.table("responsaveis").insert({"nome": novo_resp_nome.strip()}).execute()
+                            with get_connection() as conn:
+                                cursor = conn.cursor()
+                                conn.execute(text("INSERT INTO responsaveis (nome) VALUES (?)", (novo_resp_nome.strip(),))
+                                conn.commit()
                             st.success("Responsável adicionado!")
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+                        except sqlite3.IntegrityError:
+                            st.error("Responsável já cadastrado!")
 
         with col_r_list:
             st.markdown("### 📋 Responsáveis Cadastrados (Editar / Excluir)")
-            res_resp = supabase.table("responsaveis").select("id, nome").order("nome").execute()
-            df_resp = pd.DataFrame(res_resp.data) if res_resp.data else pd.DataFrame()
+            with get_connection() as conn:
+                df_resp = pd.read_sql("SELECT id, nome FROM responsaveis ORDER BY nome", conn)
             
-            if not df_resp.empty:
-                for _, r_row in df_resp.iterrows():
-                    with st.container(border=True):
-                        rc1, rc2 = st.columns(2)
-                        with rc1:
-                            with st.popover("✏️ Editar", use_container_width=True):
-                                with st.form(f"edt_resp_{r_row['id']}"):
-                                    n_resp_edit = st.text_input("Nome", value=r_row['nome'])
-                                    if st.form_submit_button("Salvar"):
-                                        supabase.table("responsaveis").update({"nome": n_resp_edit}).eq("id", r_row['id']).execute()
-                                        st.success("Atualizado!")
-                                        st.rerun()
+            for _, r_row in df_resp.iterrows():
+                with st.container(border=True):
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        with st.popover("✏️ Editar", use_container_width=True):
+                            with st.form(f"edt_resp_{r_row['id']}"):
+                                n_resp_edit = st.text_input("Nome", value=r_row['nome'])
+                                if st.form_submit_button("Salvar"):
+                                    with get_connection() as conn:
+                                        cursor = conn.cursor()
+                                        conn.execute(text("UPDATE responsaveis SET nome=? WHERE id=?", (n_resp_edit, r_row['id']))
+                                        conn.commit()
+                                    st.success("Atualizado!")
+                                    st.rerun()
                     with rc2:
                         with st.popover("🗑️ Excluir", use_container_width=True):
                             st.warning("Excluir responsável?")
                             if st.button("Sim, Excluir", key=f"del_resp_{r_row['id']}"):
-                                supabase.table("responsaveis").delete().eq("id", r_row['id']).execute()
+                                with get_connection() as conn:
+                                    cursor = conn.cursor()
+                                    conn.execute(text("DELETE FROM responsaveis WHERE id=?", (r_row['id'],))
+                                    conn.commit()
                                 st.success("Removido!")
                                 st.rerun()
                     st.write(f"**{r_row['nome']}**")
