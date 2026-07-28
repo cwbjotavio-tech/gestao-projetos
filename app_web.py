@@ -30,7 +30,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS Customizado
+# 2. CSS Customizado (Cards menores sem reduzir fontes)
 st.markdown("""
     <style>
     .block-container {
@@ -129,11 +129,18 @@ st.markdown("""
         border: 1px solid #334155;
     }
 
+    /* Cards menores mantendo tamanho das fontes */
     [data-testid="stMetric"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
-        padding: 10px !important;
-        border-radius: 8px !important;
+        padding: 6px 10px !important;
+        border-radius: 6px !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 13px !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 18px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -198,7 +205,6 @@ def init_db():
             )
         '''))
         
-        # Seeds padrão se tabelas estiverem vazias
         result_user = conn.execute(text("SELECT COUNT(*) FROM usuarios")).fetchone()[0]
         if result_user == 0:
             conn.execute(
@@ -602,7 +608,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
     "👥 Usuários & Cadastros"
 ])
 
-# 1. LISTAGEM
+# 1. LISTAGEM (Com Filtros)
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
     c1, c2, c3 = st.columns(3)
@@ -791,15 +797,18 @@ with aba_kanban:
                                 acao_cancelar_projeto(item['id'], nome_etapa)
                                 st.rerun()
 
-# 3. DASHBOARDS
+# 3. DASHBOARDS (Expandido com mais indicadores e gráficos analíticos)
 with aba_dash:
     st.subheader("Indicadores e Métricas de Desempenho")
     if not df_global.empty:
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total de Projetos", len(df_global))
+        peso_total = df_global['peso'].sum() if 'peso' in df_global.columns else 0.0
+        
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Total Projetos", len(df_global))
         m2.metric("Em Andamento", len(df_global[df_global['status_projeto'].isin(['Projeto', 'Steel', 'Sankhya'])]))
         m3.metric("Concluídos", len(df_global[df_global['status_projeto'] == 'Concluído']))
         m4.metric("Cancelados", len(df_global[df_global['status_projeto'] == 'Cancelado']))
+        m5.metric("Peso Total (kg)", f"{peso_total:,.1f}".replace(",", "."))
 
         st.divider()
         c_ch1, c_ch2 = st.columns(2)
@@ -811,6 +820,19 @@ with aba_dash:
             fig_status = px.bar(df_global['status_projeto'].value_counts().reset_index(), x='status_projeto', y='count', title="Distribuição por Etapa", labels={'status_projeto': 'Etapa', 'count': 'Quantidade'})
             fig_status.update_layout(paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#f8fafc")
             st.plotly_chart(fig_status, use_container_width=True)
+
+        st.divider()
+        c_ch3, c_ch4 = st.columns(2)
+        with c_ch3:
+            if 'responsavel' in df_global.columns:
+                fig_resp = px.bar(df_global['responsavel'].value_counts().reset_index(), x='responsavel', y='count', title="Volume de Projetos por Responsável", labels={'responsavel': 'Responsável', 'count': 'Quantidade'})
+                fig_resp.update_layout(paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#f8fafc")
+                st.plotly_chart(fig_resp, use_container_width=True)
+        with c_ch4:
+            if 'tipo' in df_global.columns:
+                fig_tipo = px.pie(df_global, names='tipo', title="Projetos por Tipo", hole=0.4)
+                fig_tipo.update_layout(paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#f8fafc")
+                st.plotly_chart(fig_tipo, use_container_width=True)
 
 # 4. FINALIZADOS
 with aba_finalizados:
