@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine, text
+import json
 
 # ── CONEXÃO COM O SUPABASE (POSTGRESQL) ─────────────────────────────────────
 if "DATABASE_URL" in st.secrets:
@@ -422,16 +423,85 @@ def autenticar_usuario(username, password):
         ).fetchone()
         return res
 
-@st.cache_data(ttl=1)   # TTL reduzido para 1 segundo (minimiza recargas lentas)
+@st.cache_data(ttl=1)
 def carregar_dados():
     return pd.read_sql("SELECT * FROM torres", engine)
 
-# --- TELA DE LOGIN E SESSÃO (inalterada) ---
+# ================ MECANISMO DE SESSÃO PERSISTENTE COM COOKIE ================
+def set_cookie(nome, valor, dias=30):
+    """Define um cookie no navegador usando JavaScript."""
+    js = f"""
+    <script>
+        var d = new Date();
+        d.setTime(d.getTime() + ({dias} * 24 * 60 * 60 * 1000));
+        var expires = "expires="+ d.toUTCString();
+        document.cookie = "{nome}=" + "{valor}" + ";" + expires + ";path=/";
+    </script>
+    """
+    st.components.v1.html(js, height=0, width=0)
+
+def get_cookie(nome):
+    """Lê o cookie do navegador e retorna o valor (vazio se não existir)."""
+    js = f"""
+    <script>
+        var name = "{nome}=";
+        var decodedCookie = decodeURIComponent(document.cookie);
+        var ca = decodedCookie.split(';');
+        var valor = "";
+        for(var i = 0; i <ca.length; i++) {{
+            var c = ca[i];
+            while (c.charAt(0) == ' ') {{
+                c = c.substring(1);
+            }}
+            if (c.indexOf(name) == 0) {{
+                valor = c.substring(name.length, c.length);
+                break;
+            }}
+        }}
+        // Envia o valor para o Streamlit via mensagem
+        window.parent.postMessage({{type: "streamlit:setComponentValue", value: valor}}, "*");
+    </script>
+    """
+    # Usamos um componente para executar o JS e retornar o valor
+    cookie = st.components.v1.html(js, height=0, width=0)
+    return cookie  # Retorna o valor, mas pode ser None na primeira execução
+
+def salvar_sessao(usuario_nome, usuario_login):
+    """Salva a sessão no session_state e também em um cookie."""
+    st.session_state["autenticado"] = True
+    st.session_state["usuario_nome"] = usuario_nome
+    st.session_state["usuario_login"] = usuario_login
+    # Cookie persistente com os dados (não seguro, apenas para conveniência)
+    dados = json.dumps({"nome": usuario_nome, "login": usuario_login})
+    set_cookie("gestao_session", dados, 30)
+
+def restaurar_sessao():
+    """Tenta restaurar a sessão a partir do cookie."""
+    # Verifica se já temos session_state definido (em caso de já estar autenticado)
+    if "autenticado" in st.session_state and st.session_state["autenticado"]:
+        return
+
+    # Tenta ler o cookie
+    cookie_value = get_cookie("gestao_session")
+    if cookie_value:
+        try:
+            dados = json.loads(cookie_value)
+            st.session_state["autenticado"] = True
+            st.session_state["usuario_nome"] = dados["nome"]
+            st.session_state["usuario_login"] = dados["login"]
+        except:
+            pass
+
+# Ao iniciar o app, tenta restaurar a sessão se não estiver autenticado
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
     st.session_state["usuario_login"] = ""
 
+if not st.session_state["autenticado"]:
+    restaurar_sessao()   # Tenta restaurar do cookie
+
+# --- TELA DE LOGIN (só aparece se não estiver autenticado) ---
 if not st.session_state["autenticado"]:
     _, col_l2, _ = st.columns([1, 2, 1])
     with col_l2:
@@ -443,29 +513,131 @@ if not st.session_state["autenticado"]:
             if st.form_submit_button("Entrar no Sistema", use_container_width=True):
                 user_info = autenticar_usuario(usuario, senha)
                 if user_info:
-                    st.session_state["autenticado"] = True
-                    st.session_state["usuario_nome"] = user_info[0]
-                    st.session_state["usuario_login"] = usuario
+                    salvar_sessao(user_info[0], usuario)   # Salva sessão (estado + cookie)
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
     st.stop()
 
+# --- SIDEBAR ---
 st.sidebar.markdown(f"👤 **Usuário Logado:**\n### {st.session_state['usuario_nome']}")
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
     st.session_state["usuario_login"] = ""
+    # Remove o cookie
+    set_cookie("gestao_session", "", -1)   # expira imediatamente
     st.rerun()
 
+# --- APLICAÇÃO PRINCIPAL ---
 df_global = carregar_dados()
 
-# ... (código de importação, cadastro e abas permanece exatamente igual ao que você já tinha)
+col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
+with col_title:
+    st.title("Controle de Projetos")
 
-# Apenas reproduzo o início para manter a integridade.
-# Coloquei aqui o restante completo, já com as alterações no Kanban.
-# (Para manter a resposta dentro do limite de espaço, insiro a partir das abas.)
+# --- IMPORTAÇÃO DE PLANILHA (mantida igual) ---
+with col_b1:
+    with st.popover("📥 Importar Planilha", use_container_width=True):
+        st.subheader("Carregar Cadastros (.xlsx / .csv)")
+        uploaded_file = st.file_uploader("Selecione o arquivo", type=["xlsx", "csv"])
+        if uploaded_file and st.button("Confirmar Importação"):
+            try:
+                df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+                registros_inseridos = 0
+                with engine.begin() as conn:
+                    for _, row in df_imp.iterrows():
+                        row_dict = row.to_dict()
+                        acionamento = obter_valor_coluna(row_dict, ['acionamento', 'acionamento*'])
+                        projeto = obter_valor_coluna(row_dict, ['projeto', 'projeto*'])
+                        if not acionamento and not projeto:
+                            continue
+                        revisao = obter_valor_coluna(row_dict, ['revisão', 'revisao', 'rev'], '00')
+                        cliente = obter_valor_coluna(row_dict, ['cliente'], 'BTC')
+                        tipo = obter_valor_coluna(row_dict, ['tipo'], 'Torre')
+                        finalidade = obter_valor_coluna(row_dict, ['finalidade'], 'Fabricação')
+                        peso_raw = obter_valor_coluna(row_dict, ['peso (kg)', 'peso', 'peso_kg'], '0')
+                        try:
+                            peso = float(str(peso_raw).replace(',', '.'))
+                        except ValueError:
+                            peso = 0.0
+                        site_1 = obter_valor_coluna(row_dict, ['site i', 'site 1', 'site_1', 'site1'])
+                        site_2 = obter_valor_coluna(row_dict, ['site ii', 'site 2', 'site_2', 'site2'])
+                        num_serie = obter_valor_coluna(row_dict, ['nº. série', 'nº série', 'num serie', 'num_serie', 'série', 'serie'])
+                        local = obter_valor_coluna(row_dict, ['local'])
+                        elemento = obter_valor_coluna(row_dict, ['elemento'])
+                        responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
+                        prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
+                        observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
+                        conn.execute(text('''
+                            INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                                                site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                                                data, observacoes, status_projeto)
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, 'Projeto')
+                        '''), {
+                            "ac": acionamento, "proj": projeto, "rev": revisao, "cli": cliente, "tipo": tipo, "fin": finalidade,
+                            "peso": peso, "s1": site_1, "s2": site_2, "ns": num_serie, "loc": local, "elem": elemento,
+                            "resp": responsavel, "prazo": prazo, "data": agora_br().strftime("%d/%m/%Y"), "obs": observacoes
+                        })
+                        registros_inseridos += 1
+                st.cache_data.clear()
+                st.success(f"{registros_inseridos} registros importados com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao importar: {e}")
+
+# --- CADASTRO EM TRÊS COLUNAS (mantido igual) ---
+with col_b2:
+    with st.popover("➕ Cadastrar Projeto", use_container_width=True):
+        st.subheader("Novo Cadastro")
+        locais_cadastrados = obter_locais_cadastrados()
+        elementos_cadastrados = obter_elementos_cadastrados()
+        lista_clientes = obter_clientes()
+        lista_responsaveis = obter_responsaveis()
+        with st.form("form_nova_torre", clear_on_submit=True):
+            col_fc1, col_fc2, col_fc3 = st.columns(3)
+            with col_fc1:
+                f_acionamento = st.text_input("Acionamento *")
+                f_projeto = st.text_input("Projeto *")
+                f_revisao = st.text_input("Revisão", value="00")
+                f_cliente = st.selectbox("Cliente", options=lista_clientes if lista_clientes else ["BTC"])
+                f_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+            with col_fc2:
+                f_finalidade = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                f_peso = st.number_input("Peso (kg)", min_value=0.0, step=50.0)
+                f_site1 = st.text_input("Site I")
+                f_site2 = st.text_input("Site II")
+                f_num_serie = st.text_input("Nº Série")
+            with col_fc3:
+                f_local_existente = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_cadastrados)
+                f_local_novo = st.text_input("Ou digite um novo Local")
+                f_elemento_existente = st.selectbox("Elemento (Padrão)", options=[""] + elementos_cadastrados)
+                f_elemento_novo = st.text_input("Ou digite um novo Elemento")
+                f_responsavel = st.selectbox("Responsável", options=lista_responsaveis if lista_responsaveis else ["Support"])
+                f_data_cad = st.date_input("Data de Cadastro", value=agora_br().date())
+                f_prazo = st.date_input("Prazo de Entrega", value=agora_br() + timedelta(days=7))
+            f_observacoes = st.text_area("Observações")
+            if st.form_submit_button("Salvar Registro", use_container_width=True):
+                f_local_final = f_local_novo.strip() if f_local_novo.strip() else f_local_existente
+                f_elemento_final = f_elemento_novo.strip() if f_elemento_novo.strip() else f_elemento_existente
+                if f_acionamento and f_projeto:
+                    with engine.begin() as conn:
+                        conn.execute(text('''
+                            INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
+                                                site_1, site_2, num_serie, local, elemento, responsavel, prazo,
+                                                data, observacoes, status_projeto)
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, 'Projeto')
+                        '''), {
+                            "ac": f_acionamento, "proj": f_projeto, "rev": f_revisao, "cli": f_cliente, "tipo": f_tipo,
+                            "fin": f_finalidade, "peso": f_peso, "s1": f_site1, "s2": f_site2, "ns": f_num_serie,
+                            "loc": f_local_final, "elem": f_elemento_final, "resp": f_responsavel,
+                            "prazo": f_prazo.strftime("%d/%m/%Y"), "data": f_data_cad.strftime("%d/%m/%Y"),
+                            "obs": f_observacoes
+                        })
+                    st.cache_data.clear()
+                    st.success("Projeto cadastrado!")
+                    st.rerun()
 
 # ABAS
 aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios = st.tabs([
@@ -473,13 +645,154 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
     "✅ Finalizados", "🚫 Cancelados", "👥 Usuários & Cadastros"
 ])
 
-# ========== 1. LISTAGEM (mantida igual) ==========
+# =============================================================================
+# 1. LISTAGEM
+# =============================================================================
 with aba_lista:
-    # ... (exatamente o código original que você já tem)
-    # Para economizar espaço, não repetirei aqui – ele permanece idêntico.
-    pass
+    st.subheader("Filtros e Relatório Completo")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar por projeto, acionamento...", key="pesquisa_rapida_lista")
+    with c2:
+        filtro_status = st.multiselect("Etapa (Status)", options=df_global["status_projeto"].dropna().unique() if not df_global.empty else [])
+    with c3:
+        filtro_situacao = st.multiselect("Situação do Projeto", options=["Em Progresso", "Parados", "Finalizado", "Cancelado"])
 
-# ========== 2. KANBAN MULTI-ETAPAS (com alterações) ==========
+    df_view = df_global.copy()
+    if not df_view.empty:
+        df_view['situacao_filtro'] = df_view.apply(classificar_situacao, axis=1)
+    if busca_texto and not df_view.empty:
+        df_view = df_view[df_view.astype(str).apply(lambda row: row.str.contains(busca_texto, case=False).any(), axis=1)]
+    if filtro_status and not df_view.empty:
+        df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
+    if filtro_situacao and not df_view.empty:
+        df_view = df_view[df_view["situacao_filtro"].isin(filtro_situacao)]
+
+    if not df_view.empty:
+        df_view['ID'] = df_view['id']
+        df_view['Acionamento'] = df_view['acionamento']
+        df_view['Projeto'] = df_view['projeto']
+        df_view['Revisão'] = df_view['revisao'].fillna('00')
+        df_view['Tipo'] = df_view['tipo']
+        df_view['Finalidade'] = df_view['finalidade']
+        df_view['Peso (kg)'] = df_view['peso']
+        df_view['Site I'] = df_view['site_1'].fillna('')
+        df_view['Site II'] = df_view['site_2'].fillna('')
+        df_view['Nº. Série'] = df_view['num_serie'].fillna('')
+        df_view['Local'] = df_view['local'].fillna('')
+        df_view['Elemento'] = df_view['elemento'].fillna('')
+        df_view['Cliente'] = df_view['cliente']
+        df_view['Responsável'] = df_view['responsavel']
+        df_view['Data'] = df_view['data']
+        df_view['Prazo'] = df_view['prazo']
+        df_view['Etapa'] = df_view['status_projeto']
+        df_view['Situação'] = df_view['situacao_filtro']
+        df_view['Progresso (%)'] = df_view['status_projeto'].map({
+            'Projeto': '25%', 'Steel': '50%', 'Sankhya': '75%', 'Concluído': '100%', 'Cancelado': '0%'
+        }).fillna('0%')
+        df_view['Status Geral'] = df_view['estado_relogio'].map({
+            'rodando': '🟢 Em Execução', 'parado': '🔴 Pausado'
+        }).fillna('🔴 Pausado')
+        df_view['Data de Cadastro'] = df_view['data'].apply(lambda x: x if x else '-')
+        df_view['Fim Projeto'] = df_view['fim_projeto'].apply(lambda x: x if x else '-')
+        df_view['Fim Steel'] = df_view['fim_steel'].apply(lambda x: x if x else '-')
+        df_view['Fim Sankhya'] = df_view['fim_sankhya'].apply(lambda x: x if x else '-')
+        df_view['Tempo Projeto'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'projeto')), axis=1)
+        df_view['Tempo Steel'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'steel')), axis=1)
+        df_view['Tempo Sankhya'] = df_view.apply(lambda row: formatar_segundos(obter_tempo_decorrido_etapa(row, 'sankhya')), axis=1)
+
+        cols_display = [
+            'ID', 'Acionamento', 'Projeto', 'Revisão', 'Tipo', 'Finalidade', 'Peso (kg)',
+            'Site I', 'Site II', 'Nº. Série', 'Local', 'Elemento', 'Cliente', 'Responsável',
+            'Data', 'Prazo', 'Etapa', 'Situação', 'Progresso (%)', 'Status Geral', 'Data de Cadastro',
+            'Fim Projeto', 'Fim Steel', 'Fim Sankhya', 'Tempo Projeto', 'Tempo Steel', 'Tempo Sankhya'
+        ]
+        st.dataframe(df_view[cols_display], use_container_width=True, hide_index=True)
+        st.divider()
+
+        st.subheader("⚡ Ações na Listagem (Editar / Excluir Registros)")
+        col_sel, col_act1, col_act2 = st.columns([3, 1, 1])
+        opcoes_torres = {f"#{row['id']} - {row['projeto']} ({row['cliente']})": row['id'] for _, row in df_view.iterrows()}
+
+        with col_sel:
+            torre_selecionada_label = st.selectbox("Selecione um projeto para modificar:", list(opcoes_torres.keys()))
+            id_selecionado = opcoes_torres[torre_selecionada_label]
+            item_sel = df_view[df_view['id'] == id_selecionado].iloc[0]
+
+        with col_act1:
+            with st.popover("✏️ Editar Projeto", use_container_width=True):
+                st.write(f"**Editando ID #{id_selecionado}**")
+                locais_edit = obter_locais_cadastrados()
+                elementos_edit = obter_elementos_cadastrados()
+                cli_edit = obter_clientes()
+                resp_edit = obter_responsaveis()
+                with st.form(key=f"form_edit_list_{id_selecionado}"):
+                    e_ac = st.text_input("Acionamento", value=str(item_sel['acionamento']))
+                    e_proj = st.text_input("Projeto", value=str(item_sel['projeto']))
+                    e_rev = st.text_input("Revisão", value=str(item_sel['revisao'] or '00'))
+                    e_cli = st.selectbox("Cliente", options=cli_edit, index=cli_edit.index(item_sel['cliente']) if item_sel['cliente'] in cli_edit else 0)
+                    e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+                    e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                    e_peso = st.number_input("Peso (kg)", value=float(item_sel['peso']))
+                    e_s1 = st.text_input("Site I", value=str(item_sel['site_1'] or ''))
+                    e_s2 = st.text_input("Site II", value=str(item_sel['site_2'] or ''))
+                    e_ns = st.text_input("Nº Série", value=str(item_sel['num_serie'] or ''))
+
+                    e_loc_atual = str(item_sel['local'] or '')
+                    idx_loc = locais_edit.index(e_loc_atual) + 1 if e_loc_atual in locais_edit else 0
+                    e_loc_ex = st.selectbox("Local / Cidade (Padrão)", options=[""] + locais_edit, index=idx_loc)
+                    e_loc_nv = st.text_input("Ou digite um novo Local", value="" if idx_loc > 0 else e_loc_atual)
+
+                    e_elem_atual = str(item_sel['elemento'] or '')
+                    idx_elem = elementos_edit.index(e_elem_atual) + 1 if e_elem_atual in elementos_edit else 0
+                    e_elem_ex = st.selectbox("Elemento (Padrão)", options=[""] + elementos_edit, index=idx_elem)
+                    e_elem_nv = st.text_input("Ou digite um novo Elemento", value="" if idx_elem > 0 else e_elem_atual)
+
+                    e_resp = st.selectbox("Responsável", options=resp_edit, index=resp_edit.index(item_sel['responsavel']) if item_sel['responsavel'] in resp_edit else 0)
+
+                    try:
+                        dt_parsed = datetime.strptime(str(item_sel['data']), "%d/%m/%Y").date()
+                    except:
+                        dt_parsed = agora_br().date()
+                    e_data = st.date_input("Data de Cadastro", value=dt_parsed)
+                    e_prazo = st.text_input("Prazo", value=str(item_sel['prazo']))
+                    e_obs = st.text_area("Observações", value=str(item_sel['observacoes'] or ''))
+
+                    if st.form_submit_button("Salvar Alterações"):
+                        e_loc_final = e_loc_nv.strip() if e_loc_nv.strip() else e_loc_ex
+                        e_elem_final = e_elem_nv.strip() if e_elem_nv.strip() else e_elem_ex
+                        editar_torre_completo(
+                            id_selecionado, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso,
+                            e_s1, e_s2, e_ns, e_loc_final, e_elem_final, e_cli, e_resp,
+                            e_data.strftime("%d/%m/%Y"), e_prazo, e_obs
+                        )
+                        st.success("Projeto atualizado com sucesso!")
+                        st.rerun()
+
+        with col_act2:
+            with st.popover("🗑️ Excluir Projeto", use_container_width=True):
+                st.warning(f"Excluir definitivamente o projeto #{id_selecionado}?")
+                if st.button("Sim, Excluir", key=f"del_list_{id_selecionado}"):
+                    excluir_torre(id_selecionado)
+                    st.success("Projeto excluído!")
+                    st.rerun()
+
+        st.write("<br>", unsafe_allow_html=True)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_view[cols_display].to_excel(writer, index=False, sheet_name='Projetos')
+        st.download_button(
+            label="📥 Baixar Relatório Completo em Excel",
+            data=buffer.getvalue(),
+            file_name=f"relatorio_projetos_{agora_br().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("Nenhum registro encontrado.")
+
+# =============================================================================
+# 2. KANBAN MULTI-ETAPAS (agora sem #ID e com botões reduzidos)
+# =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     with st.expander("🔍 Filtros e Ações em Lote do Kanban", expanded=True):
@@ -537,7 +850,7 @@ with aba_kanban:
                     id_item = item['id']
                     etapa_key = etapa_coluna.lower()
 
-                    # Card customizado (substitui st.container(border=True))
+                    # Card customizado (div com classe kanban-card)
                     st.markdown(f'''
                         <div class="kanban-card" style="
                             border:1px solid #334155;
@@ -550,15 +863,15 @@ with aba_kanban:
                         ">
                     ''', unsafe_allow_html=True)
 
-                    # Cabeçalho do card (checkbox, título, popover)
+                    # Cabeçalho: checkbox, título (agora só o nome do projeto), popover
                     c_card_chk, c_card_h1, c_card_h2 = st.columns([0.4, 3.6, 1])
                     with c_card_chk:
                         st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
                     with c_card_h1:
-                        # Título do projeto (sem #, fonte maior)
+                        # Apenas o nome do projeto, sem #ID
                         st.markdown(
                             f"<div style='font-weight:700; font-size:16px; color:#f8fafc; line-height:1.2;'>"
-                            f"{id_item} - {item['projeto']}</div>",
+                            f"{item['projeto']}</div>",
                             unsafe_allow_html=True
                         )
                     with c_card_h2:
@@ -682,10 +995,8 @@ with aba_kanban:
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
 
-# ... (restante do código: Dashboard, Finalizados, Cancelados, Usuários – inalterados)
-
 # =============================================================================
-# 3. DASHBOARDS
+# 3. DASHBOARDS (mantido igual)
 # =============================================================================
 with aba_dash:
     st.subheader("📈 Dashboard de Quantidades, Tempos e Desempenho")
