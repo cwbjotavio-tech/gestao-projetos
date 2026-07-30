@@ -548,11 +548,12 @@ col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 with col_title:
     st.title("Controle de Projetos")
 
-# --- IMPORTAÇÃO DE PLANILHA ---
+# --- IMPORTAÇÃO DE PLANILHA (com opção de importar como concluído) ---
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
         uploaded_file = st.file_uploader("Selecione o arquivo", type=["xlsx", "csv"])
+        importar_como_concluido = st.checkbox("✅ Importar todos como Concluídos", value=False)
         if uploaded_file and st.button("Confirmar Importação"):
             try:
                 df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
@@ -564,6 +565,15 @@ with col_b1:
                         projeto = obter_valor_coluna(row_dict, ['projeto', 'projeto*'])
                         if not acionamento and not projeto:
                             continue
+
+                        if importar_como_concluido:
+                            status_import = 'Concluído'
+                        else:
+                            status_import = obter_valor_coluna(row_dict, ['status_projeto', 'status', 'etapa'], 'Projeto')
+                            status_validos = ['Projeto', 'Steel', 'Sankhya', 'Concluído', 'Cancelado']
+                            if status_import not in status_validos:
+                                status_import = 'Projeto'
+
                         revisao = obter_valor_coluna(row_dict, ['revisão', 'revisao', 'rev'], '00')
                         cliente = obter_valor_coluna(row_dict, ['cliente'], 'BTC')
                         tipo = obter_valor_coluna(row_dict, ['tipo'], 'Torre')
@@ -581,15 +591,17 @@ with col_b1:
                         responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
                         prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
                         observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
+
                         conn.execute(text('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
                                                 site_1, site_2, num_serie, local, elemento, responsavel, prazo,
                                                 data, observacoes, status_projeto)
-                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, 'Projeto')
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, :status)
                         '''), {
                             "ac": acionamento, "proj": projeto, "rev": revisao, "cli": cliente, "tipo": tipo, "fin": finalidade,
                             "peso": peso, "s1": site_1, "s2": site_2, "ns": num_serie, "loc": local, "elem": elemento,
-                            "resp": responsavel, "prazo": prazo, "data": agora_br().strftime("%d/%m/%Y"), "obs": observacoes
+                            "resp": responsavel, "prazo": prazo, "data": agora_br().strftime("%d/%m/%Y"),
+                            "obs": observacoes, "status": status_import
                         })
                         registros_inseridos += 1
                 atualizar_df_global()
@@ -807,7 +819,6 @@ with aba_lista:
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     with st.expander("🔍 Filtros e Ações em Lote", expanded=True):
-        # Linha única com 5 colunas: pesquisa, etapas, situação, cliente, ações
         fk_c1, fk_c2, fk_c3, fk_c4, fk_c5 = st.columns([2.2, 2, 1.8, 1.8, 1.8])
         with fk_c1:
             busca_kanban = st.text_input(
@@ -816,12 +827,11 @@ with aba_kanban:
                 key="busca_kanban_input"
             )
         with fk_c2:
-            # Etapas incluindo Concluído (Cancelado permanece fora do Kanban)
             etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído"]
             etapas_selecionadas = st.multiselect(
                 "Etapas:",
                 options=etapas_todas,
-                default=["Projeto", "Steel", "Sankhya"],  # Concluído desmarcado por padrão
+                default=["Projeto", "Steel", "Sankhya"],
                 key="etapas_kanban_multiselect"
             )
         with fk_c3:
@@ -833,7 +843,6 @@ with aba_kanban:
                 key="situacao_kanban_multiselect"
             )
         with fk_c4:
-            # Filtro de cliente
             clientes_disponiveis = obter_clientes()
             filtro_cliente = st.multiselect(
                 "Cliente:",
@@ -887,7 +896,6 @@ with aba_kanban:
                         st.success("Ação executada!")
                         st.rerun()
 
-    # Filtragem do dataframe
     df_kanban = df_global.copy()
     if busca_kanban:
         b_term = busca_kanban.lower()
@@ -906,7 +914,6 @@ with aba_kanban:
     if filtro_cliente:
         df_kanban = df_kanban[df_kanban['cliente'].isin(filtro_cliente)]
 
-    # Se nenhuma etapa selecionada, exibe todas as disponíveis (sem filtro de etapa)
     if not etapas_selecionadas:
         etapas_exibir = etapas_todas
     else:
@@ -930,7 +937,6 @@ with aba_kanban:
                     id_item = item['id']
                     etapa_key = etapa_coluna.lower()
 
-                    # Card compacto usando container com borda
                     with st.container(border=True):
                         c_chk, c_info, c_tempo, c_btns = st.columns([0.2, 2.5, 1.3, 1.5])
 
@@ -1022,7 +1028,6 @@ with aba_kanban:
                                     acao_retroceder_etapa(id_item, etapa_coluna)
                                     st.rerun()
 
-    # Formulário de edição (exibido abaixo do Kanban se algum item estiver em edição)
     for id_item in df_global['id']:
         if st.session_state.get(f"editing_{id_item}", False):
             with st.expander(f"✏️ Editando projeto #{id_item}", expanded=True):
@@ -1221,7 +1226,6 @@ with aba_usuarios:
     st.subheader("👥 Gerenciamento do Sistema (Usuários, Clientes & Responsáveis)")
     tab_u_sub1, tab_u_sub2, tab_u_sub3 = st.tabs(["👤 Usuários", "🏢 Clientes", "👷 Responsáveis"])
 
-    # Usuários
     with tab_u_sub1:
         col_u1, col_u2 = st.columns([1, 1])
         with col_u1:
@@ -1284,7 +1288,6 @@ with aba_usuarios:
             else:
                 st.info("Nenhum usuário cadastrado.")
 
-    # Clientes
     with tab_u_sub2:
         col_c_add, col_c_list = st.columns([1, 1])
         with col_c_add:
@@ -1328,7 +1331,6 @@ with aba_usuarios:
                                 st.rerun()
                     st.write(f"**{c_row['nome']}**")
 
-    # Responsáveis
     with tab_u_sub3:
         col_r_add, col_r_list = st.columns([1, 1])
         with col_r_add:
