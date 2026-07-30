@@ -802,12 +802,13 @@ with aba_lista:
         st.info("Nenhum registro encontrado.")
 
 # =============================================================================
-# 2. KANBAN MULTI-ETAPAS (layout ajustado)
+# 2. KANBAN MULTI-ETAPAS (layout ajustado conforme solicitado)
 # =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     with st.expander("🔍 Filtros e Ações em Lote", expanded=True):
-        fk_c1, fk_c2, fk_c3, fk_c4 = st.columns([2.5, 2, 1.5, 1.5])
+        # Linha única com 5 colunas: pesquisa, etapas, situação, cliente, ações
+        fk_c1, fk_c2, fk_c3, fk_c4, fk_c5 = st.columns([2.2, 2, 1.8, 1.8, 1.8])
         with fk_c1:
             busca_kanban = st.text_input(
                 "🔎 Pesquisar:",
@@ -815,11 +816,12 @@ with aba_kanban:
                 key="busca_kanban_input"
             )
         with fk_c2:
-            etapas_todas = ["Projeto", "Steel", "Sankhya"]
+            # Etapas incluindo Concluído (Cancelado permanece fora do Kanban)
+            etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído"]
             etapas_selecionadas = st.multiselect(
-                "Etapas ativas:",
+                "Etapas:",
                 options=etapas_todas,
-                default=etapas_todas,
+                default=["Projeto", "Steel", "Sankhya"],  # Concluído desmarcado por padrão
                 key="etapas_kanban_multiselect"
             )
         with fk_c3:
@@ -831,6 +833,15 @@ with aba_kanban:
                 key="situacao_kanban_multiselect"
             )
         with fk_c4:
+            # Filtro de cliente
+            clientes_disponiveis = obter_clientes()
+            filtro_cliente = st.multiselect(
+                "Cliente:",
+                options=clientes_disponiveis,
+                default=[],
+                key="kanban_filtro_cliente"
+            )
+        with fk_c5:
             st.write("")
             with st.popover("🛠️ Ações em Lote", use_container_width=True):
                 st.markdown("**Aplicar nos cards selecionados:**")
@@ -892,38 +903,25 @@ with aba_kanban:
     if situacao_selecionada:
         df_kanban['situacao_temp'] = df_kanban.apply(classificar_situacao, axis=1)
         df_kanban = df_kanban[df_kanban['situacao_temp'].isin(situacao_selecionada)]
+    if filtro_cliente:
+        df_kanban = df_kanban[df_kanban['cliente'].isin(filtro_cliente)]
 
-    etapas_ativas = [e for e in etapas_todas if e in etapas_selecionadas]
+    # Se nenhuma etapa selecionada, exibe todas as disponíveis (sem filtro de etapa)
+    if not etapas_selecionadas:
+        etapas_exibir = etapas_todas
+    else:
+        etapas_exibir = etapas_selecionadas
+
     icones_map = {
         "Projeto": "📐 Projeto", "Steel": "⚙️ Steel", "Sankhya": "🏢 Sankhya",
         "Concluído": "✅ Concluído", "Cancelado": "🚫 Cancelado"
     }
 
-    # Controle de exibição das colunas extras
-    mostrar_concluidos = st.session_state.get("mostrar_concluidos", False)
-    mostrar_cancelados = st.session_state.get("mostrar_cancelados", False)
-
-    col_btn_conc, col_btn_canc, _ = st.columns([1, 1, 4])
-    with col_btn_conc:
-        if st.button("📂 Ver Finalizados" if not mostrar_concluidos else "📁 Ocultar Finalizados", use_container_width=True):
-            st.session_state["mostrar_concluidos"] = not mostrar_concluidos
-            st.rerun()
-    with col_btn_canc:
-        if st.button("📂 Ver Cancelados" if not mostrar_cancelados else "📁 Ocultar Cancelados", use_container_width=True):
-            st.session_state["mostrar_cancelados"] = not mostrar_cancelados
-            st.rerun()
-
-    etapas_exibir = etapas_ativas[:]
-    if mostrar_concluidos:
-        etapas_exibir.append("Concluído")
-    if mostrar_cancelados:
-        etapas_exibir.append("Cancelado")
-
     if etapas_exibir:
         cols_k = st.columns(len(etapas_exibir))
         for idx, etapa_coluna in enumerate(etapas_exibir):
             with cols_k[idx]:
-                st.markdown(f"#### {icones_map[etapa_coluna]}")
+                st.markdown(f"#### {icones_map.get(etapa_coluna, etapa_coluna)}")
                 df_etapa = df_kanban[df_kanban['status_projeto'] == etapa_coluna]
                 if df_etapa.empty:
                     st.caption("*(Vazio)*")
@@ -984,7 +982,6 @@ with aba_kanban:
                                             st.rerun()
                                 with btn_cols[3]:
                                     with st.popover("ℹ️", key=f"k_info_{id_item}", help="Detalhes"):
-                                        # CSS para limitar tamanho do popover
                                         st.markdown("""
                                             <style>
                                             div[data-testid="stPopover"] {
@@ -1022,10 +1019,6 @@ with aba_kanban:
 
                             elif etapa_coluna == "Concluído":
                                 if st.button("↩️ Retornar", key=f"k_back_conc_{id_item}", use_container_width=True):
-                                    acao_retroceder_etapa(id_item, etapa_coluna)
-                                    st.rerun()
-                            elif etapa_coluna == "Cancelado":
-                                if st.button("↩️ Reativar", key=f"k_back_canc_{id_item}", use_container_width=True):
                                     acao_retroceder_etapa(id_item, etapa_coluna)
                                     st.rerun()
 
