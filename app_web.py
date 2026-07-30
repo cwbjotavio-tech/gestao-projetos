@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import streamlit as st
@@ -266,6 +267,21 @@ def formatar_segundos(segundos):
     minutos = int((segundos % 3600) // 60)
     segs = int(segundos % 60)
     return f"{horas:02d}:{minutos:02d}:{segs:02d}"
+
+def converter_duracao_para_segundos(valor):
+    """Converte uma string HH:MM:SS ou um número para segundos inteiros."""
+    if pd.isna(valor) or str(valor).strip() == "":
+        return 0
+    if isinstance(valor, (int, float)):
+        return int(valor)
+    match = re.match(r'(\d{1,4}):([0-5]\d):([0-5]\d)', str(valor).strip())
+    if match:
+        h, m, s = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        return h * 3600 + m * 60 + s
+    try:
+        return int(float(str(valor).replace(',', '.')))
+    except:
+        return 0
 
 def obter_tempo_decorrido_etapa(item, etapa_key):
     coluna = f'tempo_{etapa_key}_sec'
@@ -556,7 +572,7 @@ col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 with col_title:
     st.title("Controle de Projetos")
 
-# --- IMPORTAÇÃO DE PLANILHA (com opção de importar como concluído) ---
+# --- IMPORTAÇÃO DE PLANILHA (AGORA COMPLETA, RESPEITANDO DATAS E TEMPOS) ---
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
@@ -597,19 +613,72 @@ with col_b1:
                         local = obter_valor_coluna(row_dict, ['local'])
                         elemento = obter_valor_coluna(row_dict, ['elemento'])
                         responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
-                        prazo = obter_valor_coluna(row_dict, ['prazo'], (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y"))
+
+                        # --- TRATAMENTO DE DATAS ---
+                        data_cad_str = obter_valor_coluna(row_dict, ['data', 'data de cadastro', 'data_cadastro'], "")
+                        if data_cad_str:
+                            try:
+                                # Tenta interpretar como datetime e depois formata para o padrão brasileiro
+                                dt_parsed = pd.to_datetime(data_cad_str, dayfirst=True, errors='coerce')
+                                if pd.notna(dt_parsed):
+                                    data_cad = dt_parsed.strftime("%d/%m/%Y")
+                                else:
+                                    data_cad = agora_br().strftime("%d/%m/%Y")
+                            except:
+                                data_cad = agora_br().strftime("%d/%m/%Y")
+                        else:
+                            data_cad = agora_br().strftime("%d/%m/%Y")
+
+                        prazo_str = obter_valor_coluna(row_dict, ['prazo', 'prazo de entrega', 'prazo_entrega'], "")
+                        if prazo_str:
+                            try:
+                                dt_prazo = pd.to_datetime(prazo_str, dayfirst=True, errors='coerce')
+                                if pd.notna(dt_prazo):
+                                    prazo = dt_prazo.strftime("%d/%m/%Y")
+                                else:
+                                    prazo = (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y")
+                            except:
+                                prazo = (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y")
+                        else:
+                            prazo = (agora_br() + timedelta(days=7)).strftime("%d/%m/%Y")
+
+                        # --- TRATAMENTO DOS TEMPOS (SEGUNDOS) ---
+                        t_proj = converter_duracao_para_segundos(
+                            obter_valor_coluna(row_dict, ['tempo_projeto', 'tempo projeto', 'tempo_projeto_sec'], '0')
+                        )
+                        t_steel = converter_duracao_para_segundos(
+                            obter_valor_coluna(row_dict, ['tempo_steel', 'tempo steel', 'tempo_steel_sec'], '0')
+                        )
+                        t_sankhya = converter_duracao_para_segundos(
+                            obter_valor_coluna(row_dict, ['tempo_sankhya', 'tempo sankhya', 'tempo_sankhya_sec'], '0')
+                        )
+
+                        # Datas de início e fim de cada etapa (se existirem no arquivo)
+                        inicio_proj = obter_valor_coluna(row_dict, ['inicio_projeto', 'fim_projeto_inicio'], '')
+                        fim_proj = obter_valor_coluna(row_dict, ['fim_projeto', 'fim projeto'], '')
+                        inicio_steel = obter_valor_coluna(row_dict, ['inicio_steel', 'fim_steel_inicio'], '')
+                        fim_steel = obter_valor_coluna(row_dict, ['fim_steel', 'fim steel'], '')
+                        inicio_sankhya = obter_valor_coluna(row_dict, ['inicio_sankhya', 'fim_sankhya_inicio'], '')
+                        fim_sankhya = obter_valor_coluna(row_dict, ['fim_sankhya', 'fim sankhya'], '')
+
                         observacoes = obter_valor_coluna(row_dict, ['observações', 'observacoes', 'obs'], 'Importado via planilha')
 
                         conn.execute(text('''
                             INSERT INTO torres (acionamento, projeto, revisao, cliente, tipo, finalidade, peso,
                                                 site_1, site_2, num_serie, local, elemento, responsavel, prazo,
-                                                data, observacoes, status_projeto)
-                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, :status)
+                                                data, observacoes, status_projeto,
+                                                tempo_projeto_sec, inicio_projeto, fim_projeto,
+                                                tempo_steel_sec, inicio_steel, fim_steel,
+                                                tempo_sankhya_sec, inicio_sankhya, fim_sankhya)
+                            VALUES (:ac, :proj, :rev, :cli, :tipo, :fin, :peso, :s1, :s2, :ns, :loc, :elem, :resp, :prazo, :data, :obs, :status,
+                                    :tp, :ip, :fp, :ts, :is, :fs, :tsk, :isk, :fsk)
                         '''), {
                             "ac": acionamento, "proj": projeto, "rev": revisao, "cli": cliente, "tipo": tipo, "fin": finalidade,
                             "peso": peso, "s1": site_1, "s2": site_2, "ns": num_serie, "loc": local, "elem": elemento,
-                            "resp": responsavel, "prazo": prazo, "data": agora_br().strftime("%d/%m/%Y"),
-                            "obs": observacoes, "status": status_import
+                            "resp": responsavel, "prazo": prazo, "data": data_cad, "obs": observacoes, "status": status_import,
+                            "tp": t_proj, "ip": inicio_proj, "fp": fim_proj,
+                            "ts": t_steel, "is": inicio_steel, "fs": fim_steel,
+                            "tsk": t_sankhya, "isk": inicio_sankhya, "fsk": fim_sankhya
                         })
                         registros_inseridos += 1
                 atualizar_df_global()
@@ -722,7 +791,6 @@ with aba_lista:
             'Projeto': '25%', 'Steel': '50%', 'Sankhya': '75%', 'Concluído': '100%', 'Cancelado': '0%'
         }).fillna('0%')
 
-        # Corrigindo o Status Geral para exibir corretamente concluídos e cancelados
         def obter_status_geral(row):
             if row['status_projeto'] == 'Concluído':
                 return '✅ Concluído'
