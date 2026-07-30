@@ -28,7 +28,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS CUSTOMIZADO
+# 2. CSS CUSTOMIZADO (incluindo controle global do popover)
 st.markdown("""
     <style>
     .block-container {
@@ -131,6 +131,14 @@ st.markdown("""
     }
     .kanban-card .stButton > button:hover {
         background-color: #1d4ed8 !important;
+    }
+
+    /* Controle global dos popovers para não saírem da tela */
+    div[data-testid="stPopover"] {
+        max-width: 450px !important;
+        max-height: 80vh !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -669,7 +677,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
 ])
 
 # =============================================================================
-# 1. LISTAGEM
+# 1. LISTAGEM (com Status Geral corrigido)
 # =============================================================================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
@@ -713,9 +721,20 @@ with aba_lista:
         df_view['Progresso (%)'] = df_view['status_projeto'].map({
             'Projeto': '25%', 'Steel': '50%', 'Sankhya': '75%', 'Concluído': '100%', 'Cancelado': '0%'
         }).fillna('0%')
-        df_view['Status Geral'] = df_view['estado_relogio'].map({
-            'rodando': '🟢 Em Execução', 'parado': '🔴 Pausado'
-        }).fillna('🔴 Pausado')
+
+        # Corrigindo o Status Geral para exibir corretamente concluídos e cancelados
+        def obter_status_geral(row):
+            if row['status_projeto'] == 'Concluído':
+                return '✅ Concluído'
+            elif row['status_projeto'] == 'Cancelado':
+                return '🚫 Cancelado'
+            elif row['estado_relogio'] == 'rodando':
+                return '🟢 Em Execução'
+            else:
+                return '🔴 Pausado'
+
+        df_view['Status Geral'] = df_view.apply(obter_status_geral, axis=1)
+
         df_view['Data de Cadastro'] = df_view['data'].apply(lambda x: x if x else '-')
         df_view['Fim Projeto'] = df_view['fim_projeto'].apply(lambda x: x if x else '-')
         df_view['Fim Steel'] = df_view['fim_steel'].apply(lambda x: x if x else '-')
@@ -814,7 +833,7 @@ with aba_lista:
         st.info("Nenhum registro encontrado.")
 
 # =============================================================================
-# 2. KANBAN MULTI-ETAPAS (layout ajustado conforme solicitado)
+# 2. KANBAN MULTI-ETAPAS (com popover corrigido)
 # =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
@@ -988,15 +1007,6 @@ with aba_kanban:
                                             st.rerun()
                                 with btn_cols[3]:
                                     with st.popover("ℹ️", key=f"k_info_{id_item}", help="Detalhes"):
-                                        st.markdown("""
-                                            <style>
-                                            div[data-testid="stPopover"] {
-                                                max-width: 450px !important;
-                                                max-height: 80vh !important;
-                                                overflow-y: auto !important;
-                                            }
-                                            </style>
-                                        """, unsafe_allow_html=True)
                                         st.markdown(f"**Projeto:** {item['projeto']}")
                                         st.markdown(f"**Acionamento:** {item['acionamento']}")
                                         st.markdown(f"**Cliente:** {item['cliente']}")
