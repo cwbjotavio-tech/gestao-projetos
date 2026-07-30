@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 if "DATABASE_URL" in st.secrets:
     DATABASE_URL = st.secrets["DATABASE_URL"]
 else:
-    DATABASE_URL = "sqlite:///gestao_torres.db"   # fallback para testes locais
+    DATABASE_URL = "sqlite:///gestao_torres.db"
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -122,15 +122,47 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Reduzir tamanho dos botões dentro dos cards do Kanban */
+    /* Cards compactos no Kanban */
+    .kanban-card {
+        border:1px solid #334155;
+        border-radius:4px;
+        padding:4px 8px;
+        margin-bottom:4px;
+        background:#1e293b;
+        font-size:14px;
+        line-height:1.4;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
     .kanban-card .stButton > button {
         padding: 2px 6px !important;
-        font-size: 11px !important;
+        font-size: 12px !important;
         min-height: unset !important;
         line-height: 1 !important;
+        margin: 0px 1px !important;
     }
     .kanban-card .stButton > button:hover {
         background-color: #1d4ed8 !important;
+    }
+    .kanban-card .stCheckbox {
+        margin-bottom: 0px;
+    }
+
+    /* Scroll horizontal para as colunas das etapas */
+    .kanban-scroll {
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 10px;
+    }
+    .kanban-column {
+        display: inline-block;
+        vertical-align: top;
+        width: 320px;
+        min-width: 320px;
+        margin-right: 12px;
+        white-space: normal;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -195,7 +227,6 @@ def init_db():
             )
         '''))
 
-        # Seeds padrão
         result_user = conn.execute(text("SELECT COUNT(*) FROM usuarios")).fetchone()[0]
         if result_user == 0:
             conn.execute(
@@ -285,16 +316,12 @@ def obter_valor_coluna(row_dict, nomes_possiveis, padrao=""):
                 return str(val).strip()
     return padrao
 
-# ================ SESSÃO DO DATAFRAME ================
 def carregar_dados_db():
-    """Recarrega o DataFrame diretamente do banco."""
     return pd.read_sql("SELECT * FROM torres", engine)
 
 def atualizar_df_global():
-    """Atualiza a session_state com os dados mais recentes do banco."""
     st.session_state.df_global = carregar_dados_db()
 
-# ================ AÇÕES QUE ALTERAM O BANCO E O ESTADO ================
 def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
@@ -454,7 +481,7 @@ def autenticar_usuario(username, password):
         ).fetchone()
         return res
 
-# ================ MECANISMO DE SESSÃO PERSISTENTE ================
+# ================ SESSÃO PERSISTENTE ================
 def set_cookie(nome, valor, dias=30):
     js = f"""
     <script>
@@ -662,7 +689,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
 ])
 
 # =============================================================================
-# 1. LISTAGEM
+# 1. LISTAGEM (mantida igual)
 # =============================================================================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
@@ -807,22 +834,22 @@ with aba_lista:
         st.info("Nenhum registro encontrado.")
 
 # =============================================================================
-# 2. KANBAN MULTI-ETAPAS (pesquisa ampliada)
+# 2. KANBAN MULTI-ETAPAS (redesenhado)
 # =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
-    with st.expander("🔍 Filtros e Ações em Lote do Kanban", expanded=True):
+    with st.expander("🔍 Filtros e Ações em Lote", expanded=True):
         fk_c1, fk_c2, fk_c3, fk_c4 = st.columns([2.5, 2, 1.5, 1.5])
         with fk_c1:
             busca_kanban = st.text_input(
-                "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I, Responsável, Cliente, Site II):",
-                placeholder="Digite para buscar...",
+                "🔎 Pesquisar:",
+                placeholder="Projeto, Acionamento, Nº Série, Site I, Responsável, Cliente, Site II",
                 key="busca_kanban_input"
             )
         with fk_c2:
-            etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
+            etapas_todas = ["Projeto", "Steel", "Sankhya"]
             etapas_selecionadas = st.multiselect(
-                "Exibir Etapas:",
+                "Etapas ativas:",
                 options=etapas_todas,
                 default=etapas_todas,
                 key="etapas_kanban_multiselect"
@@ -881,10 +908,10 @@ with aba_kanban:
                         st.success("Ação executada!")
                         st.rerun()
 
+    # Filtragem do dataframe
     df_kanban = df_global.copy()
     if busca_kanban:
         b_term = busca_kanban.lower()
-        # Ampliado: agora busca também em responsavel, cliente e site_2
         df_kanban = df_kanban[
             df_kanban['projeto'].astype(str).str.lower().str.contains(b_term) |
             df_kanban['acionamento'].astype(str).str.lower().str.contains(b_term) |
@@ -898,16 +925,41 @@ with aba_kanban:
         df_kanban['situacao_temp'] = df_kanban.apply(classificar_situacao, axis=1)
         df_kanban = df_kanban[df_kanban['situacao_temp'].isin(situacao_selecionada)]
 
-    etapas_exibir = [e for e in etapas_todas if e in etapas_selecionadas] if etapas_selecionadas else etapas_todas
+    etapas_ativas = [e for e in etapas_todas if e in etapas_selecionadas]
     icones_map = {
         "Projeto": "📐 Projeto", "Steel": "⚙️ Steel", "Sankhya": "🏢 Sankhya",
         "Concluído": "✅ Concluído", "Cancelado": "🚫 Cancelado"
     }
 
+    # Colunas ocultas controladas por botão
+    mostrar_concluidos = st.session_state.get("mostrar_concluidos", False)
+    mostrar_cancelados = st.session_state.get("mostrar_cancelados", False)
+
+    # Botões para exibir/ocultar colunas extras
+    col_btn_conc, col_btn_canc, _ = st.columns([1, 1, 4])
+    with col_btn_conc:
+        if st.button("📂 Ver Finalizados" if not mostrar_concluidos else "📁 Ocultar Finalizados", use_container_width=True):
+            st.session_state["mostrar_concluidos"] = not mostrar_concluidos
+            st.rerun()
+    with col_btn_canc:
+        if st.button("📂 Ver Cancelados" if not mostrar_cancelados else "📁 Ocultar Cancelados", use_container_width=True):
+            st.session_state["mostrar_cancelados"] = not mostrar_cancelados
+            st.rerun()
+
+    # Construir lista de etapas a exibir
+    etapas_exibir = etapas_ativas[:]
+    if mostrar_concluidos:
+        etapas_exibir.append("Concluído")
+    if mostrar_cancelados:
+        etapas_exibir.append("Cancelado")
+
     if etapas_exibir:
+        # Container com scroll horizontal
+        st.markdown('<div class="kanban-scroll">', unsafe_allow_html=True)
         cols_k = st.columns(len(etapas_exibir))
         for idx, etapa_coluna in enumerate(etapas_exibir):
             with cols_k[idx]:
+                st.markdown(f"<div class='kanban-column'>", unsafe_allow_html=True)
                 st.markdown(f"#### {icones_map[etapa_coluna]}")
                 df_etapa = df_kanban[df_kanban['status_projeto'] == etapa_coluna]
                 if df_etapa.empty:
@@ -917,144 +969,151 @@ with aba_kanban:
                     id_item = item['id']
                     etapa_key = etapa_coluna.lower()
 
-                    st.markdown(f'''
-                        <div class="kanban-card" style="
-                            border:1px solid #334155;
-                            border-radius:6px;
-                            padding:6px 6px;
-                            margin-bottom:8px;
-                            background:#1e293b;
-                            font-size:14px;
-                            line-height:1.4;
-                        ">
-                    ''', unsafe_allow_html=True)
+                    # Card compacto
+                    with st.container():
+                        st.markdown('<div class="kanban-card">', unsafe_allow_html=True)
+                        # Checkbox + informações principais + botões
+                        c_chk, c_info, c_btns = st.columns([0.3, 3, 2])
+                        with c_chk:
+                            st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
+                        with c_info:
+                            # Linha 1: Projeto e Acionamento
+                            st.markdown(
+                                f"<span style='font-weight:700; font-size:14px;'>{item['projeto']}</span> "
+                                f"<span style='color:#94a3b8; font-size:13px;'>{item['acionamento']}</span>",
+                                unsafe_allow_html=True
+                            )
+                            # Linha 2: Cliente, Site I e cronômetro
+                            segundos = obter_tempo_decorrido_etapa(item, etapa_key)
+                            tempo_str = formatar_segundos(segundos)
+                            status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
+                            st.markdown(
+                                f"<span style='font-size:13px; color:#cbd5e1;'>"
+                                f"{item['cliente']} | Site I: {item['site_1'] or '-'} | "
+                                f"⏱️ <code>{tempo_str}</code> {status_ico}</span>",
+                                unsafe_allow_html=True
+                            )
+                        with c_btns:
+                            # Botões de ação (apenas ícones, sem texto)
+                            btn_cols = st.columns(5)
+                            if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
+                                with btn_cols[0]:
+                                    if item['estado_relogio'] == 'parado':
+                                        if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar"):
+                                            acao_iniciar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                    else:
+                                        if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar"):
+                                            acao_pausar_relogio(id_item, etapa_key)
+                                            st.rerun()
+                                with btn_cols[1]:
+                                    if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
+                                        if st.button("✅", key=f"k_fin_{id_item}", help="Avançar"):
+                                            proxima_etapa = {"Projeto": "Steel", "Steel": "Sankhya", "Sankhya": "Concluído"}[etapa_coluna]
+                                            acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
+                                            st.rerun()
+                                with btn_cols[2]:
+                                    if etapa_coluna != "Projeto":
+                                        if st.button("↩️", key=f"k_back_{id_item}", help="Retroceder"):
+                                            acao_retroceder_etapa(id_item, etapa_coluna)
+                                            st.rerun()
+                                with btn_cols[3]:
+                                    # Ícone de informações (contém editar e cancelar)
+                                    with st.popover("ℹ️", key=f"k_info_{id_item}", help="Detalhes e ações"):
+                                        st.markdown(f"**Projeto:** {item['projeto']}")
+                                        st.markdown(f"**Acionamento:** {item['acionamento']}")
+                                        st.markdown(f"**Cliente:** {item['cliente']}")
+                                        st.markdown(f"**Site I:** {item['site_1'] or '-'}")
+                                        st.markdown(f"**Site II:** {item['site_2'] or '-'}")
+                                        st.markdown(f"**Nº Série:** {item['num_serie'] or '-'}")
+                                        st.markdown(f"**Local:** {item['local'] or '-'}")
+                                        st.markdown(f"**Elemento:** {item['elemento'] or '-'}")
+                                        st.markdown(f"**Tipo:** {item['tipo']}")
+                                        st.markdown(f"**Finalidade:** {item['finalidade']}")
+                                        st.markdown(f"**Peso:** {item['peso']} kg")
+                                        st.markdown(f"**Responsável:** {item['responsavel']}")
+                                        st.markdown(f"**Data:** {item['data']}")
+                                        st.markdown(f"**Prazo:** {item['prazo']}")
+                                        st.markdown(f"**Observações:** {item['observacoes'] or '-'}")
+                                        st.divider()
+                                        # Botões de editar e cancelar
+                                        col_edit, col_canc = st.columns(2)
+                                        with col_edit:
+                                            if st.button("✏️ Editar", key=f"k_edit_pop_{id_item}", use_container_width=True):
+                                                st.session_state[f"editing_{id_item}"] = True
+                                                st.rerun()
+                                        with col_canc:
+                                            if st.button("🚫 Cancelar", key=f"k_canc_pop_{id_item}", use_container_width=True):
+                                                acao_cancelar_projeto(id_item, etapa_coluna)
+                                                st.rerun()
 
-                    c_card_chk, c_card_h1, c_card_h2 = st.columns([0.4, 3.6, 1])
-                    with c_card_chk:
-                        st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
-                    with c_card_h1:
-                        st.markdown(
-                            f"<div style='font-weight:700; font-size:16px; color:#f8fafc; line-height:1.2;'>"
-                            f"{item['projeto']}</div>",
-                            unsafe_allow_html=True
-                        )
-                    with c_card_h2:
-                        with st.popover("⚙️"):
-                            loc_k = obter_locais_cadastrados()
-                            elem_k = obter_elementos_cadastrados()
-                            cli_k = obter_clientes()
-                            resp_k = obter_responsaveis()
-                            with st.expander("✏️ Editar Projeto", expanded=False):
-                                with st.form(key=f"k_edit_form_{id_item}"):
-                                    e_ac = st.text_input("Acionamento", value=item['acionamento'])
-                                    e_proj = st.text_input("Projeto", value=item['projeto'])
-                                    e_rev = st.text_input("Revisão", value=item['revisao'] or '00')
-                                    e_cli = st.selectbox("Cliente", options=cli_k, index=cli_k.index(item['cliente']) if item['cliente'] in cli_k else 0)
-                                    e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
-                                    e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
-                                    e_peso = st.number_input("Peso (kg)", value=float(item['peso']))
-                                    e_s1 = st.text_input("Site I", value=item['site_1'] or '')
-                                    e_s2 = st.text_input("Site II", value=item['site_2'] or '')
-                                    e_ns = st.text_input("Nº Série", value=item['num_serie'] or '')
-                                    e_l_atual = str(item['local'] or '')
-                                    idx_lk = loc_k.index(e_l_atual) + 1 if e_l_atual in loc_k else 0
-                                    e_lk_ex = st.selectbox("Local / Cidade (Padrão)", options=[""] + loc_k, index=idx_lk, key=f"k_lk_ex_{id_item}")
-                                    e_lk_nv = st.text_input("Ou digite um novo Local", value="" if idx_lk > 0 else e_l_atual, key=f"k_lk_nv_{id_item}")
-                                    e_el_atual = str(item['elemento'] or '')
-                                    idx_ek = elem_k.index(e_el_atual) + 1 if e_el_atual in elem_k else 0
-                                    e_ek_ex = st.selectbox("Elemento (Padrão)", options=[""] + elem_k, index=idx_ek, key=f"k_ek_ex_{id_item}")
-                                    e_ek_nv = st.text_input("Ou digite um novo Elemento", value="" if idx_ek > 0 else e_el_atual, key=f"k_ek_nv_{id_item}")
-                                    e_resp = st.selectbox("Responsável", options=resp_k, index=resp_k.index(item['responsavel']) if item['responsavel'] in resp_k else 0)
-                                    try:
-                                        dt_p = datetime.strptime(str(item['data']), "%d/%m/%Y").date()
-                                    except:
-                                        dt_p = agora_br().date()
-                                    e_data_k = st.date_input("Data de Cadastro", value=dt_p, key=f"k_data_{id_item}")
-                                    e_prazo = st.text_input("Prazo", value=item['prazo'])
-                                    e_obs = st.text_area("Observações", value=item['observacoes'] or "")
-                                    if st.form_submit_button("Salvar"):
-                                        e_l_final = e_lk_nv.strip() if e_lk_nv.strip() else e_lk_ex
-                                        e_el_final = e_ek_nv.strip() if e_ek_nv.strip() else e_ek_ex
-                                        editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns,
-                                                              e_l_final, e_el_final, e_cli, e_resp, e_data_k.strftime("%d/%m/%Y"), e_prazo, e_obs)
+                            # Se for Concluído ou Cancelado, mostrar apenas retroceder
+                            elif etapa_coluna == "Concluído":
+                                with btn_cols[0]:
+                                    if st.button("↩️", key=f"k_back_conc_{id_item}", help="Retornar"):
+                                        acao_retroceder_etapa(id_item, etapa_coluna)
                                         st.rerun()
-                            with st.expander("🗑️ Excluir Projeto", expanded=False):
-                                st.warning("Confirma a exclusão?")
-                                if st.button("Sim, Excluir", key=f"k_del_{id_item}"):
-                                    excluir_torre(id_item)
-                                    st.rerun()
+                            elif etapa_coluna == "Cancelado":
+                                with btn_cols[0]:
+                                    if st.button("↩️", key=f"k_back_canc_{id_item}", help="Reativar"):
+                                        acao_retroceder_etapa(id_item, etapa_coluna)
+                                        st.rerun()
 
-                    c_info1, c_info2 = st.columns(2)
-                    with c_info1:
-                        st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>⚡ <b>Acion:</b> {item['acionamento']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>📍 <b>Site I:</b> {item['site_1'] or '-'}</div>", unsafe_allow_html=True)
-                    with c_info2:
-                        st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>🏢 <b>Cli:</b> {item['cliente']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>🔢 <b>Série:</b> {item['num_serie'] or '-'}</div>", unsafe_allow_html=True)
-
-                    if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
-                        segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key)
-                        tempo_str = formatar_segundos(segundos_etapa)
-                        status_ico = "🟢" if item['estado_relogio'] == 'rodando' else "🔴"
-                        st.markdown(f"<div style='font-size:14px; font-weight:600; margin-top:4px; margin-bottom:4px;'>⏱️ <code style='font-size:13px; padding:2px 4px;'>{tempo_str}</code> {status_ico}</div>", unsafe_allow_html=True)
-
-                        proxima_etapa = etapas_todas[etapas_todas.index(etapa_coluna) + 1]
-                        if etapa_coluna == "Projeto":
-                            c_btn1, c_btn2, c_btn3 = st.columns(3)
-                            with c_btn1:
-                                if item['estado_relogio'] == 'parado':
-                                    if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar Temporizador", use_container_width=True):
-                                        acao_iniciar_relogio(id_item, etapa_key)
-                                        st.rerun()
-                                else:
-                                    if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar Temporizador", use_container_width=True):
-                                        acao_pausar_relogio(id_item, etapa_key)
-                                        st.rerun()
-                            with c_btn2:
-                                if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
-                                    acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
-                                    st.rerun()
-                            with c_btn3:
-                                if st.button("🚫", key=f"k_canc_{id_item}", help="Cancelar Projeto", use_container_width=True):
-                                    acao_cancelar_projeto(id_item, etapa_coluna)
-                                    st.rerun()
-                        else:
-                            c_btn_back, c_btn1, c_btn2, c_btn3 = st.columns(4)
-                            with c_btn_back:
-                                if st.button("↩️", key=f"k_back_{id_item}", help="Retornar à etapa anterior", use_container_width=True):
-                                    acao_retroceder_etapa(id_item, etapa_coluna)
-                                    st.rerun()
-                            with c_btn1:
-                                if item['estado_relogio'] == 'parado':
-                                    if st.button("▶️", key=f"k_start_{id_item}", help="Iniciar Temporizador", use_container_width=True):
-                                        acao_iniciar_relogio(id_item, etapa_key)
-                                        st.rerun()
-                                else:
-                                    if st.button("⏸️", key=f"k_pause_{id_item}", help="Pausar Temporizador", use_container_width=True):
-                                        acao_pausar_relogio(id_item, etapa_key)
-                                        st.rerun()
-                            with c_btn2:
-                                if st.button("✅", key=f"k_fin_{id_item}", help="Avançar etapa", use_container_width=True):
-                                    acao_finalizar_etapa(id_item, etapa_coluna, proxima_etapa)
-                                    st.rerun()
-                            with c_btn3:
-                                if st.button("🚫", key=f"k_canc_{id_item}", help="Cancelar Projeto", use_container_width=True):
-                                    acao_cancelar_projeto(id_item, etapa_coluna)
-                                    st.rerun()
-                    elif etapa_coluna == "Concluído":
-                        st.write("")
-                        if st.button("↩️ Retornar Etapa Anterior", key=f"k_back_conc_{id_item}", use_container_width=True):
-                            acao_retroceder_etapa(id_item, etapa_coluna)
-                            st.rerun()
-                    elif etapa_coluna == "Cancelado":
-                        st.write("")
-                        if st.button("↩️ Reativar / Retornar Etapa", key=f"k_back_canc_{id_item}", use_container_width=True):
-                            acao_retroceder_etapa(id_item, etapa_coluna)
-                            st.rerun()
-
-                    st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)  # fecha kanban-card
+                st.markdown('</div>', unsafe_allow_html=True)  # fecha kanban-column
+        st.markdown('</div>', unsafe_allow_html=True)  # fecha kanban-scroll
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
+
+    # Formulário de edição (se solicitado)
+    for id_item in df_global['id']:
+        if st.session_state.get(f"editing_{id_item}", False):
+            with st.expander(f"✏️ Editando projeto #{id_item}", expanded=True):
+                item = df_global[df_global['id'] == id_item].iloc[0]
+                loc_k = obter_locais_cadastrados()
+                elem_k = obter_elementos_cadastrados()
+                cli_k = obter_clientes()
+                resp_k = obter_responsaveis()
+                with st.form(key=f"k_edit_form_{id_item}"):
+                    e_ac = st.text_input("Acionamento", value=item['acionamento'])
+                    e_proj = st.text_input("Projeto", value=item['projeto'])
+                    e_rev = st.text_input("Revisão", value=item['revisao'] or '00')
+                    e_cli = st.selectbox("Cliente", options=cli_k, index=cli_k.index(item['cliente']) if item['cliente'] in cli_k else 0)
+                    e_tipo = st.selectbox("Tipo", ["Torre", "Rooftop", "Item para site", "Projeto interno"])
+                    e_fin = st.selectbox("Finalidade", ["Fabricação", "Estimativa de Custo"])
+                    e_peso = st.number_input("Peso (kg)", value=float(item['peso']))
+                    e_s1 = st.text_input("Site I", value=item['site_1'] or '')
+                    e_s2 = st.text_input("Site II", value=item['site_2'] or '')
+                    e_ns = st.text_input("Nº Série", value=item['num_serie'] or '')
+                    e_l_atual = str(item['local'] or '')
+                    idx_lk = loc_k.index(e_l_atual) + 1 if e_l_atual in loc_k else 0
+                    e_lk_ex = st.selectbox("Local / Cidade (Padrão)", options=[""] + loc_k, index=idx_lk, key=f"k_lk_ex_{id_item}")
+                    e_lk_nv = st.text_input("Ou digite um novo Local", value="" if idx_lk > 0 else e_l_atual, key=f"k_lk_nv_{id_item}")
+                    e_el_atual = str(item['elemento'] or '')
+                    idx_ek = elem_k.index(e_el_atual) + 1 if e_el_atual in elem_k else 0
+                    e_ek_ex = st.selectbox("Elemento (Padrão)", options=[""] + elem_k, index=idx_ek, key=f"k_ek_ex_{id_item}")
+                    e_ek_nv = st.text_input("Ou digite um novo Elemento", value="" if idx_ek > 0 else e_el_atual, key=f"k_ek_nv_{id_item}")
+                    e_resp = st.selectbox("Responsável", options=resp_k, index=resp_k.index(item['responsavel']) if item['responsavel'] in resp_k else 0)
+                    try:
+                        dt_p = datetime.strptime(str(item['data']), "%d/%m/%Y").date()
+                    except:
+                        dt_p = agora_br().date()
+                    e_data_k = st.date_input("Data de Cadastro", value=dt_p, key=f"k_data_{id_item}")
+                    e_prazo = st.text_input("Prazo", value=item['prazo'])
+                    e_obs = st.text_area("Observações", value=item['observacoes'] or "")
+                    col_save, col_cancel_edit = st.columns(2)
+                    with col_save:
+                        if st.form_submit_button("Salvar"):
+                            e_l_final = e_lk_nv.strip() if e_lk_nv.strip() else e_lk_ex
+                            e_el_final = e_ek_nv.strip() if e_ek_nv.strip() else e_ek_ex
+                            editar_torre_completo(id_item, e_ac, e_proj, e_rev, e_tipo, e_fin, e_peso, e_s1, e_s2, e_ns,
+                                                  e_l_final, e_el_final, e_cli, e_resp, e_data_k.strftime("%d/%m/%Y"), e_prazo, e_obs)
+                            st.session_state[f"editing_{id_item}"] = False
+                            st.rerun()
+                    with col_cancel_edit:
+                        if st.form_submit_button("Cancelar"):
+                            st.session_state[f"editing_{id_item}"] = False
+                            st.rerun()
 
 # =============================================================================
 # 3. DASHBOARDS (mantido igual)
