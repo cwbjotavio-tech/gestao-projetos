@@ -1,18 +1,18 @@
 import hashlib
 import io
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine, text
-import json
 
 # ── CONEXÃO COM O SUPABASE (POSTGRESQL) ─────────────────────────────────────
 if "DATABASE_URL" in st.secrets:
     DATABASE_URL = st.secrets["DATABASE_URL"]
 else:
-    DATABASE_URL = "sqlite:///gestao_torres.db"   # fallback (apenas para testes locais)
+    DATABASE_URL = "sqlite:///gestao_torres.db"   # fallback para testes locais
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -221,7 +221,7 @@ def init_db():
 
 init_db()
 
-# --- FUNÇÕES UTILITÁRIAS (mesmas do código original) ---
+# --- FUNÇÕES UTILITÁRIAS ---
 def obter_locais_cadastrados():
     with engine.connect() as conn:
         result = conn.execute(text("SELECT DISTINCT local FROM torres WHERE local IS NOT NULL AND local != '' ORDER BY local"))
@@ -429,7 +429,6 @@ def carregar_dados():
 
 # ================ MECANISMO DE SESSÃO PERSISTENTE COM COOKIE ================
 def set_cookie(nome, valor, dias=30):
-    """Define um cookie no navegador usando JavaScript."""
     js = f"""
     <script>
         var d = new Date();
@@ -441,7 +440,6 @@ def set_cookie(nome, valor, dias=30):
     st.components.v1.html(js, height=0, width=0)
 
 def get_cookie(nome):
-    """Lê o cookie do navegador e retorna o valor (vazio se não existir)."""
     js = f"""
     <script>
         var name = "{nome}=";
@@ -458,30 +456,22 @@ def get_cookie(nome):
                 break;
             }}
         }}
-        // Envia o valor para o Streamlit via mensagem
         window.parent.postMessage({{type: "streamlit:setComponentValue", value: valor}}, "*");
     </script>
     """
-    # Usamos um componente para executar o JS e retornar o valor
     cookie = st.components.v1.html(js, height=0, width=0)
-    return cookie  # Retorna o valor, mas pode ser None na primeira execução
+    return cookie
 
 def salvar_sessao(usuario_nome, usuario_login):
-    """Salva a sessão no session_state e também em um cookie."""
     st.session_state["autenticado"] = True
     st.session_state["usuario_nome"] = usuario_nome
     st.session_state["usuario_login"] = usuario_login
-    # Cookie persistente com os dados (não seguro, apenas para conveniência)
     dados = json.dumps({"nome": usuario_nome, "login": usuario_login})
     set_cookie("gestao_session", dados, 30)
 
 def restaurar_sessao():
-    """Tenta restaurar a sessão a partir do cookie."""
-    # Verifica se já temos session_state definido (em caso de já estar autenticado)
     if "autenticado" in st.session_state and st.session_state["autenticado"]:
         return
-
-    # Tenta ler o cookie
     cookie_value = get_cookie("gestao_session")
     if cookie_value:
         try:
@@ -492,16 +482,16 @@ def restaurar_sessao():
         except:
             pass
 
-# Ao iniciar o app, tenta restaurar a sessão se não estiver autenticado
+# Inicializa estado da sessão
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
     st.session_state["usuario_login"] = ""
 
 if not st.session_state["autenticado"]:
-    restaurar_sessao()   # Tenta restaurar do cookie
+    restaurar_sessao()
 
-# --- TELA DE LOGIN (só aparece se não estiver autenticado) ---
+# --- TELA DE LOGIN ---
 if not st.session_state["autenticado"]:
     _, col_l2, _ = st.columns([1, 2, 1])
     with col_l2:
@@ -513,7 +503,7 @@ if not st.session_state["autenticado"]:
             if st.form_submit_button("Entrar no Sistema", use_container_width=True):
                 user_info = autenticar_usuario(usuario, senha)
                 if user_info:
-                    salvar_sessao(user_info[0], usuario)   # Salva sessão (estado + cookie)
+                    salvar_sessao(user_info[0], usuario)
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
@@ -526,8 +516,7 @@ if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
     st.session_state["usuario_login"] = ""
-    # Remove o cookie
-    set_cookie("gestao_session", "", -1)   # expira imediatamente
+    set_cookie("gestao_session", "", -1)
     st.rerun()
 
 # --- APLICAÇÃO PRINCIPAL ---
@@ -646,7 +635,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
 ])
 
 # =============================================================================
-# 1. LISTAGEM
+# 1. LISTAGEM (completa, sem alterações)
 # =============================================================================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
@@ -791,36 +780,89 @@ with aba_lista:
         st.info("Nenhum registro encontrado.")
 
 # =============================================================================
-# 2. KANBAN MULTI-ETAPAS (agora sem #ID e com botões reduzidos)
+# 2. KANBAN MULTI-ETAPAS (com filtro de situação e popover de ações em lote)
 # =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     with st.expander("🔍 Filtros e Ações em Lote do Kanban", expanded=True):
-        fk_c1, fk_c2, fk_c3 = st.columns([2, 2, 1])
+        # Linha com 4 colunas: busca, etapas, situação, ações
+        fk_c1, fk_c2, fk_c3, fk_c4 = st.columns([2, 2, 1.5, 1.5])
         with fk_c1:
-            busca_kanban = st.text_input("🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I):",
-                                         placeholder="Digite para buscar...", key="busca_kanban_input")
+            busca_kanban = st.text_input(
+                "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I):",
+                placeholder="Digite para buscar...",
+                key="busca_kanban_input"
+            )
         with fk_c2:
             etapas_todas = ["Projeto", "Steel", "Sankhya", "Concluído", "Cancelado"]
-            etapas_selecionadas = st.multiselect("Exibir Etapas:", options=etapas_todas, default=etapas_todas,
-                                                 key="etapas_kanban_multiselect")
+            etapas_selecionadas = st.multiselect(
+                "Exibir Etapas:",
+                options=etapas_todas,
+                default=etapas_todas,
+                key="etapas_kanban_multiselect"
+            )
         with fk_c3:
-            st.write("")
-            if st.button("🚀 Avançar Selecionados", use_container_width=True):
+            situacao_opcoes = ["Em Progresso", "Parados"]
+            situacao_selecionada = st.multiselect(
+                "Situação:",
+                options=situacao_opcoes,
+                default=situacao_opcoes,  # por padrão mostra ambos
+                key="situacao_kanban_multiselect"
+            )
+        with fk_c4:
+            st.write("")  # pequeno espaçamento
+            with st.popover("🛠️ Ações em Lote", use_container_width=True):
+                st.markdown("**Aplicar nos cards selecionados:**")
+                # Mapeamentos úteis
                 proximo_map = {"Projeto": "Steel", "Steel": "Sankhya", "Sankhya": "Concluído"}
-                atualizados = 0
-                for _, item in df_global.iterrows():
-                    if st.session_state.get(f"sel_card_{item['id']}", False):
-                        st_proj = item['status_projeto']
-                        if st_proj in proximo_map:
-                            acao_finalizar_etapa(item['id'], st_proj, proximo_map[st_proj])
-                            atualizados += 1
-                if atualizados > 0:
-                    st.success(f"{atualizados} projetos avançados com sucesso!")
-                    st.rerun()
+                # Obter IDs selecionados
+                ids_sel = [item['id'] for _, item in df_global.iterrows()
+                           if st.session_state.get(f"sel_card_{item['id']}", False)]
+                if not ids_sel:
+                    st.info("Nenhum card selecionado.")
                 else:
-                    st.warning("Nenhum projeto elegível selecionado.")
+                    # Iniciar (para parados)
+                    if st.button("▶️ Iniciar Temporizador (parados)", use_container_width=True):
+                        for tid in ids_sel:
+                            item = df_global[df_global['id'] == tid].iloc[0]
+                            if item['status_projeto'] in ['Projeto', 'Steel', 'Sankhya'] and item['estado_relogio'] == 'parado':
+                                acao_iniciar_relogio(tid, item['status_projeto'].lower())
+                        st.success("Ação executada!")
+                        st.rerun()
+                    # Pausar (para rodando)
+                    if st.button("⏸️ Pausar Temporizador (rodando)", use_container_width=True):
+                        for tid in ids_sel:
+                            item = df_global[df_global['id'] == tid].iloc[0]
+                            if item['status_projeto'] in ['Projeto', 'Steel', 'Sankhya'] and item['estado_relogio'] == 'rodando':
+                                acao_pausar_relogio(tid, item['status_projeto'].lower())
+                        st.success("Ação executada!")
+                        st.rerun()
+                    # Avançar
+                    if st.button("✅ Avançar Etapa", use_container_width=True):
+                        for tid in ids_sel:
+                            item = df_global[df_global['id'] == tid].iloc[0]
+                            st_proj = item['status_projeto']
+                            if st_proj in proximo_map:
+                                acao_finalizar_etapa(tid, st_proj, proximo_map[st_proj])
+                        st.success("Ação executada!")
+                        st.rerun()
+                    # Retroceder
+                    if st.button("↩️ Retroceder Etapa", use_container_width=True):
+                        for tid in ids_sel:
+                            item = df_global[df_global['id'] == tid].iloc[0]
+                            acao_retroceder_etapa(tid, item['status_projeto'])
+                        st.success("Ação executada!")
+                        st.rerun()
+                    # Cancelar
+                    if st.button("🚫 Cancelar Projeto", use_container_width=True):
+                        for tid in ids_sel:
+                            item = df_global[df_global['id'] == tid].iloc[0]
+                            if item['status_projeto'] in ['Projeto', 'Steel', 'Sankhya']:
+                                acao_cancelar_projeto(tid, item['status_projeto'])
+                        st.success("Ação executada!")
+                        st.rerun()
 
+    # Filtragem do dataframe
     df_kanban = df_global.copy()
     if busca_kanban:
         b_term = busca_kanban.lower()
@@ -830,6 +872,12 @@ with aba_kanban:
             df_kanban['num_serie'].fillna('').astype(str).str.lower().str.contains(b_term) |
             df_kanban['site_1'].fillna('').astype(str).str.lower().str.contains(b_term)
         ]
+
+    # Aplicar filtro de situação (Em Progresso / Parados)
+    if situacao_selecionada:
+        # classificar_situacao retorna 'Em Progresso' ou 'Parados' para itens não finalizados/cancelados
+        df_kanban['situacao_temp'] = df_kanban.apply(classificar_situacao, axis=1)
+        df_kanban = df_kanban[df_kanban['situacao_temp'].isin(situacao_selecionada)]
 
     etapas_exibir = [e for e in etapas_todas if e in etapas_selecionadas] if etapas_selecionadas else etapas_todas
     icones_map = {
@@ -850,7 +898,6 @@ with aba_kanban:
                     id_item = item['id']
                     etapa_key = etapa_coluna.lower()
 
-                    # Card customizado (div com classe kanban-card)
                     st.markdown(f'''
                         <div class="kanban-card" style="
                             border:1px solid #334155;
@@ -863,12 +910,10 @@ with aba_kanban:
                         ">
                     ''', unsafe_allow_html=True)
 
-                    # Cabeçalho: checkbox, título (agora só o nome do projeto), popover
                     c_card_chk, c_card_h1, c_card_h2 = st.columns([0.4, 3.6, 1])
                     with c_card_chk:
                         st.checkbox("", key=f"sel_card_{id_item}", label_visibility="collapsed")
                     with c_card_h1:
-                        # Apenas o nome do projeto, sem #ID
                         st.markdown(
                             f"<div style='font-weight:700; font-size:16px; color:#f8fafc; line-height:1.2;'>"
                             f"{item['projeto']}</div>",
@@ -876,7 +921,6 @@ with aba_kanban:
                         )
                     with c_card_h2:
                         with st.popover("⚙️"):
-                            # Editar / Excluir (código igual ao original)
                             loc_k = obter_locais_cadastrados()
                             elem_k = obter_elementos_cadastrados()
                             cli_k = obter_clientes()
@@ -921,7 +965,6 @@ with aba_kanban:
                                     excluir_torre(id_item)
                                     st.rerun()
 
-                    # Informações do card (duas colunas)
                     c_info1, c_info2 = st.columns(2)
                     with c_info1:
                         st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>⚡ <b>Acion:</b> {item['acionamento']}</div>", unsafe_allow_html=True)
@@ -930,7 +973,6 @@ with aba_kanban:
                         st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>🏢 <b>Cli:</b> {item['cliente']}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div style='font-size:14px; color:#cbd5e1;'>🔢 <b>Série:</b> {item['num_serie'] or '-'}</div>", unsafe_allow_html=True)
 
-                    # Cronômetro e botões de ação
                     if etapa_coluna in ["Projeto", "Steel", "Sankhya"]:
                         segundos_etapa = obter_tempo_decorrido_etapa(item, etapa_key)
                         tempo_str = formatar_segundos(segundos_etapa)
@@ -991,7 +1033,7 @@ with aba_kanban:
                             acao_retroceder_etapa(id_item, etapa_coluna)
                             st.rerun()
 
-                    st.markdown('</div>', unsafe_allow_html=True)   # fecha div kanban-card
+                    st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("Nenhuma etapa selecionada para exibição.")
 
@@ -1140,7 +1182,7 @@ with aba_usuarios:
     st.subheader("👥 Gerenciamento do Sistema (Usuários, Clientes & Responsáveis)")
     tab_u_sub1, tab_u_sub2, tab_u_sub3 = st.tabs(["👤 Usuários", "🏢 Clientes", "👷 Responsáveis"])
 
-    # Usuários
+    # Usuários (mesmo código anterior)
     with tab_u_sub1:
         col_u1, col_u2 = st.columns([1, 1])
         with col_u1:
@@ -1203,7 +1245,7 @@ with aba_usuarios:
             else:
                 st.info("Nenhum usuário cadastrado.")
 
-    # Clientes
+    # Clientes (mesmo código)
     with tab_u_sub2:
         col_c_add, col_c_list = st.columns([1, 1])
         with col_c_add:
@@ -1247,7 +1289,7 @@ with aba_usuarios:
                                 st.rerun()
                     st.write(f"**{c_row['nome']}**")
 
-    # Responsáveis
+    # Responsáveis (mesmo código)
     with tab_u_sub3:
         col_r_add, col_r_list = st.columns([1, 1])
         with col_r_add:
