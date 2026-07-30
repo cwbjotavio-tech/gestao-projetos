@@ -28,7 +28,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS CUSTOMIZADO (incluindo redução dos botões no Kanban)
+# 2. CSS CUSTOMIZADO
 st.markdown("""
     <style>
     .block-container {
@@ -285,6 +285,16 @@ def obter_valor_coluna(row_dict, nomes_possiveis, padrao=""):
                 return str(val).strip()
     return padrao
 
+# ================ SESSÃO DO DATAFRAME ================
+def carregar_dados_db():
+    """Recarrega o DataFrame diretamente do banco."""
+    return pd.read_sql("SELECT * FROM torres", engine)
+
+def atualizar_df_global():
+    """Atualiza a session_state com os dados mais recentes do banco."""
+    st.session_state.df_global = carregar_dados_db()
+
+# ================ AÇÕES QUE ALTERAM O BANCO E O ESTADO ================
 def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
@@ -294,7 +304,11 @@ def acao_iniciar_relogio(torre_id, etapa_key):
         if not res or not res[0]:
             conn.execute(text(f"UPDATE torres SET inicio_{etapa_key}=:val WHERE id=:id"), {"val": now_str, "id": torre_id})
         conn.execute(text("UPDATE torres SET estado_relogio='rodando', timestamp_ultimo_inicio=:ts WHERE id=:id"), {"ts": now_iso, "id": torre_id})
-    st.cache_data.clear()
+    idx = st.session_state.df_global['id'] == torre_id
+    st.session_state.df_global.loc[idx, 'estado_relogio'] = 'rodando'
+    st.session_state.df_global.loc[idx, 'timestamp_ultimo_inicio'] = now_iso
+    if not res or not res[0]:
+        st.session_state.df_global.loc[idx, f'inicio_{etapa_key}'] = now_str
 
 def acao_pausar_relogio(torre_id, etapa_key):
     now_br = agora_br()
@@ -313,7 +327,11 @@ def acao_pausar_relogio(torre_id, etapa_key):
                 text(f"UPDATE torres SET tempo_{etapa_key}_sec=:tempo, estado_relogio='parado', timestamp_ultimo_inicio='' WHERE id=:id"),
                 {"tempo": novo_tempo, "id": torre_id}
             )
-    st.cache_data.clear()
+    idx = st.session_state.df_global['id'] == torre_id
+    if res and res[1]:
+        st.session_state.df_global.loc[idx, f'tempo_{etapa_key}_sec'] = novo_tempo
+    st.session_state.df_global.loc[idx, 'estado_relogio'] = 'parado'
+    st.session_state.df_global.loc[idx, 'timestamp_ultimo_inicio'] = ''
 
 def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
     etapa_key = etapa_atual.lower()
@@ -344,7 +362,12 @@ def acao_finalizar_etapa(torre_id, etapa_atual, proxima_etapa):
             "status": proxima_etapa,
             "id": torre_id
         })
-    st.cache_data.clear()
+    idx = st.session_state.df_global['id'] == torre_id
+    st.session_state.df_global.loc[idx, f'tempo_{etapa_key}_sec'] = novo_tempo
+    st.session_state.df_global.loc[idx, f'fim_{etapa_key}'] = now_str
+    st.session_state.df_global.loc[idx, 'estado_relogio'] = 'parado'
+    st.session_state.df_global.loc[idx, 'timestamp_ultimo_inicio'] = ''
+    st.session_state.df_global.loc[idx, 'status_projeto'] = proxima_etapa
 
 def acao_retroceder_etapa(torre_id, etapa_atual):
     anterior_map = {
@@ -366,7 +389,11 @@ def acao_retroceder_etapa(torre_id, etapa_atual):
                 timestamp_ultimo_inicio=''
             WHERE id=:id
         '''), {"status": etapa_anterior, "id": torre_id})
-    st.cache_data.clear()
+    idx = st.session_state.df_global['id'] == torre_id
+    st.session_state.df_global.loc[idx, 'status_projeto'] = etapa_anterior
+    st.session_state.df_global.loc[idx, f'fim_{etapa_anterior_key}'] = ''
+    st.session_state.df_global.loc[idx, 'estado_relogio'] = 'parado'
+    st.session_state.df_global.loc[idx, 'timestamp_ultimo_inicio'] = ''
 
 def acao_cancelar_projeto(torre_id, etapa_atual):
     etapa_key = etapa_atual.lower() if etapa_atual.lower() in ['projeto', 'steel', 'sankhya'] else 'projeto'
@@ -390,12 +417,16 @@ def acao_cancelar_projeto(torre_id, etapa_atual):
                 status_projeto='Cancelado'
             WHERE id=:id
         '''), {"tempo": novo_tempo, "id": torre_id})
-    st.cache_data.clear()
+    idx = st.session_state.df_global['id'] == torre_id
+    st.session_state.df_global.loc[idx, f'tempo_{etapa_key}_sec'] = novo_tempo
+    st.session_state.df_global.loc[idx, 'estado_relogio'] = 'parado'
+    st.session_state.df_global.loc[idx, 'timestamp_ultimo_inicio'] = ''
+    st.session_state.df_global.loc[idx, 'status_projeto'] = 'Cancelado'
 
 def excluir_torre(torre_id):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM torres WHERE id=:id"), {"id": torre_id})
-    st.cache_data.clear()
+    atualizar_df_global()
 
 def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalidade, peso,
                           site_1, site_2, num_serie, local, elemento, cliente, responsavel,
@@ -413,7 +444,7 @@ def editar_torre_completo(torre_id, acionamento, projeto, revisao, tipo, finalid
             "cli": cliente, "resp": responsavel, "data": data_cad, "prazo": prazo, "obs": observacoes,
             "id": torre_id
         })
-    st.cache_data.clear()
+    atualizar_df_global()
 
 def autenticar_usuario(username, password):
     with engine.connect() as conn:
@@ -423,11 +454,7 @@ def autenticar_usuario(username, password):
         ).fetchone()
         return res
 
-@st.cache_data(ttl=1)
-def carregar_dados():
-    return pd.read_sql("SELECT * FROM torres", engine)
-
-# ================ MECANISMO DE SESSÃO PERSISTENTE COM COOKIE ================
+# ================ MECANISMO DE SESSÃO PERSISTENTE ================
 def set_cookie(nome, valor, dias=30):
     js = f"""
     <script>
@@ -482,7 +509,6 @@ def restaurar_sessao():
         except:
             pass
 
-# Inicializa estado da sessão
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
@@ -491,7 +517,6 @@ if "autenticado" not in st.session_state:
 if not st.session_state["autenticado"]:
     restaurar_sessao()
 
-# --- TELA DE LOGIN ---
 if not st.session_state["autenticado"]:
     _, col_l2, _ = st.columns([1, 2, 1])
     with col_l2:
@@ -509,7 +534,6 @@ if not st.session_state["autenticado"]:
                     st.error("Usuário ou senha incorretos.")
     st.stop()
 
-# --- SIDEBAR ---
 st.sidebar.markdown(f"👤 **Usuário Logado:**\n### {st.session_state['usuario_nome']}")
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
@@ -519,14 +543,17 @@ if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
     set_cookie("gestao_session", "", -1)
     st.rerun()
 
-# --- APLICAÇÃO PRINCIPAL ---
-df_global = carregar_dados()
+# --- DATAFRAME GLOBAL ---
+if "df_global" not in st.session_state:
+    atualizar_df_global()
+
+df_global = st.session_state.df_global
 
 col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 with col_title:
     st.title("Controle de Projetos")
 
-# --- IMPORTAÇÃO DE PLANILHA (mantida igual) ---
+# --- IMPORTAÇÃO DE PLANILHA ---
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
@@ -570,13 +597,13 @@ with col_b1:
                             "resp": responsavel, "prazo": prazo, "data": agora_br().strftime("%d/%m/%Y"), "obs": observacoes
                         })
                         registros_inseridos += 1
-                st.cache_data.clear()
+                atualizar_df_global()
                 st.success(f"{registros_inseridos} registros importados com sucesso!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro ao importar: {e}")
 
-# --- CADASTRO EM TRÊS COLUNAS (mantido igual) ---
+# --- CADASTRO EM TRÊS COLUNAS ---
 with col_b2:
     with st.popover("➕ Cadastrar Projeto", use_container_width=True):
         st.subheader("Novo Cadastro")
@@ -624,7 +651,7 @@ with col_b2:
                             "prazo": f_prazo.strftime("%d/%m/%Y"), "data": f_data_cad.strftime("%d/%m/%Y"),
                             "obs": f_observacoes
                         })
-                    st.cache_data.clear()
+                    atualizar_df_global()
                     st.success("Projeto cadastrado!")
                     st.rerun()
 
@@ -635,7 +662,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
 ])
 
 # =============================================================================
-# 1. LISTAGEM (completa, sem alterações)
+# 1. LISTAGEM
 # =============================================================================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
@@ -780,16 +807,15 @@ with aba_lista:
         st.info("Nenhum registro encontrado.")
 
 # =============================================================================
-# 2. KANBAN MULTI-ETAPAS (com filtro de situação e popover de ações em lote)
+# 2. KANBAN MULTI-ETAPAS (pesquisa ampliada)
 # =============================================================================
 with aba_kanban:
     st.subheader("📊 Kanban Multi-Etapas")
     with st.expander("🔍 Filtros e Ações em Lote do Kanban", expanded=True):
-        # Linha com 4 colunas: busca, etapas, situação, ações
-        fk_c1, fk_c2, fk_c3, fk_c4 = st.columns([2, 2, 1.5, 1.5])
+        fk_c1, fk_c2, fk_c3, fk_c4 = st.columns([2.5, 2, 1.5, 1.5])
         with fk_c1:
             busca_kanban = st.text_input(
-                "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I):",
+                "🔎 Pesquisar (Projeto, Acionamento, Nº Série, Site I, Responsável, Cliente, Site II):",
                 placeholder="Digite para buscar...",
                 key="busca_kanban_input"
             )
@@ -806,22 +832,19 @@ with aba_kanban:
             situacao_selecionada = st.multiselect(
                 "Situação:",
                 options=situacao_opcoes,
-                default=situacao_opcoes,  # por padrão mostra ambos
+                default=situacao_opcoes,
                 key="situacao_kanban_multiselect"
             )
         with fk_c4:
-            st.write("")  # pequeno espaçamento
+            st.write("")
             with st.popover("🛠️ Ações em Lote", use_container_width=True):
                 st.markdown("**Aplicar nos cards selecionados:**")
-                # Mapeamentos úteis
                 proximo_map = {"Projeto": "Steel", "Steel": "Sankhya", "Sankhya": "Concluído"}
-                # Obter IDs selecionados
                 ids_sel = [item['id'] for _, item in df_global.iterrows()
                            if st.session_state.get(f"sel_card_{item['id']}", False)]
                 if not ids_sel:
                     st.info("Nenhum card selecionado.")
                 else:
-                    # Iniciar (para parados)
                     if st.button("▶️ Iniciar Temporizador (parados)", use_container_width=True):
                         for tid in ids_sel:
                             item = df_global[df_global['id'] == tid].iloc[0]
@@ -829,7 +852,6 @@ with aba_kanban:
                                 acao_iniciar_relogio(tid, item['status_projeto'].lower())
                         st.success("Ação executada!")
                         st.rerun()
-                    # Pausar (para rodando)
                     if st.button("⏸️ Pausar Temporizador (rodando)", use_container_width=True):
                         for tid in ids_sel:
                             item = df_global[df_global['id'] == tid].iloc[0]
@@ -837,7 +859,6 @@ with aba_kanban:
                                 acao_pausar_relogio(tid, item['status_projeto'].lower())
                         st.success("Ação executada!")
                         st.rerun()
-                    # Avançar
                     if st.button("✅ Avançar Etapa", use_container_width=True):
                         for tid in ids_sel:
                             item = df_global[df_global['id'] == tid].iloc[0]
@@ -846,14 +867,12 @@ with aba_kanban:
                                 acao_finalizar_etapa(tid, st_proj, proximo_map[st_proj])
                         st.success("Ação executada!")
                         st.rerun()
-                    # Retroceder
                     if st.button("↩️ Retroceder Etapa", use_container_width=True):
                         for tid in ids_sel:
                             item = df_global[df_global['id'] == tid].iloc[0]
                             acao_retroceder_etapa(tid, item['status_projeto'])
                         st.success("Ação executada!")
                         st.rerun()
-                    # Cancelar
                     if st.button("🚫 Cancelar Projeto", use_container_width=True):
                         for tid in ids_sel:
                             item = df_global[df_global['id'] == tid].iloc[0]
@@ -862,20 +881,20 @@ with aba_kanban:
                         st.success("Ação executada!")
                         st.rerun()
 
-    # Filtragem do dataframe
     df_kanban = df_global.copy()
     if busca_kanban:
         b_term = busca_kanban.lower()
+        # Ampliado: agora busca também em responsavel, cliente e site_2
         df_kanban = df_kanban[
             df_kanban['projeto'].astype(str).str.lower().str.contains(b_term) |
             df_kanban['acionamento'].astype(str).str.lower().str.contains(b_term) |
             df_kanban['num_serie'].fillna('').astype(str).str.lower().str.contains(b_term) |
-            df_kanban['site_1'].fillna('').astype(str).str.lower().str.contains(b_term)
+            df_kanban['site_1'].fillna('').astype(str).str.lower().str.contains(b_term) |
+            df_kanban['responsavel'].fillna('').astype(str).str.lower().str.contains(b_term) |
+            df_kanban['cliente'].fillna('').astype(str).str.lower().str.contains(b_term) |
+            df_kanban['site_2'].fillna('').astype(str).str.lower().str.contains(b_term)
         ]
-
-    # Aplicar filtro de situação (Em Progresso / Parados)
     if situacao_selecionada:
-        # classificar_situacao retorna 'Em Progresso' ou 'Parados' para itens não finalizados/cancelados
         df_kanban['situacao_temp'] = df_kanban.apply(classificar_situacao, axis=1)
         df_kanban = df_kanban[df_kanban['situacao_temp'].isin(situacao_selecionada)]
 
@@ -1176,13 +1195,13 @@ with aba_cancelados:
         st.info("Nenhum projeto cancelado.")
 
 # =============================================================================
-# 6. USUÁRIOS & CADASTROS (CLIENTES E RESPONSÁVEIS)
+# 6. USUÁRIOS & CADASTROS
 # =============================================================================
 with aba_usuarios:
     st.subheader("👥 Gerenciamento do Sistema (Usuários, Clientes & Responsáveis)")
     tab_u_sub1, tab_u_sub2, tab_u_sub3 = st.tabs(["👤 Usuários", "🏢 Clientes", "👷 Responsáveis"])
 
-    # Usuários (mesmo código anterior)
+    # Usuários
     with tab_u_sub1:
         col_u1, col_u2 = st.columns([1, 1])
         with col_u1:
@@ -1245,7 +1264,7 @@ with aba_usuarios:
             else:
                 st.info("Nenhum usuário cadastrado.")
 
-    # Clientes (mesmo código)
+    # Clientes
     with tab_u_sub2:
         col_c_add, col_c_list = st.columns([1, 1])
         with col_c_add:
@@ -1289,7 +1308,7 @@ with aba_usuarios:
                                 st.rerun()
                     st.write(f"**{c_row['nome']}**")
 
-    # Responsáveis (mesmo código)
+    # Responsáveis
     with tab_u_sub3:
         col_r_add, col_r_list = st.columns([1, 1])
         with col_r_add:
