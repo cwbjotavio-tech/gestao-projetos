@@ -311,7 +311,7 @@ def carregar_dados_db():
 def atualizar_df_global():
     st.session_state.df_global = carregar_dados_db()
 
-# Ações de temporizador (mantidas do código anterior, inalteradas)
+# Ações de temporizador (mantidas)
 def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
@@ -612,7 +612,6 @@ with col_b1:
                         elemento = obter_valor_coluna(row_dict, ['elemento'])
                         responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
 
-                        # Extração apenas da data (YYYY-MM-DD ou DD/MM/YYYY) com regex
                         def extrair_data(valor_str):
                             if not valor_str:
                                 return None
@@ -770,15 +769,12 @@ with aba_lista:
     if filtro_situacao and not df_view.empty:
         df_view = df_view[df_view["situacao_filtro"].isin(filtro_situacao)]
 
-    # Filtro de data
     if data_inicio is not None or data_fim is not None:
         coluna_data = opcoes_data[campo_data_nome]
-        # Converte a coluna de data para datetime (formato DD/MM/YYYY, removendo horas se houver)
         df_view[coluna_data] = df_view[coluna_data].apply(
             lambda x: pd.to_datetime(str(x).split(' ')[0], format='%d/%m/%Y', errors='coerce')
             if x and str(x).strip() != '' else pd.NaT
         )
-        # Aplica filtro de data
         if data_inicio is not None:
             df_view = df_view[df_view[coluna_data] >= pd.to_datetime(data_inicio)]
         if data_fim is not None:
@@ -1460,26 +1456,27 @@ with aba_usuarios:
 
     with tab_u_sub4:
         st.markdown("### 🧹 Correção de Datas")
-        st.warning("Use este botão para converter **todas** as datas que estão no formato ISO (AAAA-MM-DD HH:MM:SS) para DD/MM/YYYY.")
-        if st.button("🔄 Corrigir datas do banco", use_container_width=True):
+        st.warning("Clique abaixo para corrigir SOMENTE as datas que estão com hora (formato ISO). Datas já em DD/MM/YYYY não serão alteradas.")
+        if st.button("🔄 Corrigir datas com hora", use_container_width=True):
             with engine.begin() as conn:
+                # Corrige apenas datas que contêm dois-pontos (indicativo de hora)
                 conn.execute(text("""
                     UPDATE torres
-                    SET data = TO_CHAR(data::date, 'DD/MM/YYYY')
-                    WHERE data ~ '^\d{4}-\d{2}-\d{2}'
+                    SET data = TO_CHAR(data::timestamp, 'DD/MM/YYYY')
+                    WHERE data LIKE '%:%'
                 """))
                 conn.execute(text("""
                     UPDATE torres
-                    SET prazo = TO_CHAR(prazo::date, 'DD/MM/YYYY')
-                    WHERE prazo ~ '^\d{4}-\d{2}-\d{2}'
+                    SET prazo = TO_CHAR(prazo::timestamp, 'DD/MM/YYYY')
+                    WHERE prazo LIKE '%:%'
                 """))
                 for col in ['inicio_projeto', 'fim_projeto', 'inicio_steel', 'fim_steel', 'inicio_sankhya', 'fim_sankhya']:
                     conn.execute(text(f"""
                         UPDATE torres
-                        SET {col} = TO_CHAR({col}::date, 'DD/MM/YYYY')
-                        WHERE {col} ~ '^\d{{4}}-\d{{2}}-\d{{2}}'
+                        SET {col} = TO_CHAR({col}::timestamp, 'DD/MM/YYYY')
+                        WHERE {col} LIKE '%:%'
                     """))
             atualizar_df_global()
-            st.success("Datas corrigidas com sucesso! Recarregue a página se necessário.")
+            st.success("Datas corrigidas! Registros que já estavam em DD/MM/YYYY permanecem inalterados.")
             st.rerun()
-        st.markdown("Após corrigir, **todas as datas** exibirão apenas o dia/mês/ano. Novas importações já são gravadas corretamente.")
+        st.markdown("Após a correção, todas as datas exibirão apenas dia/mês/ano. Novas importações já gravam nesse formato.")
