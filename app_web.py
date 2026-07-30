@@ -29,7 +29,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. CSS CUSTOMIZADO (incluindo controle global do popover)
+# 2. CSS CUSTOMIZADO
 st.markdown("""
     <style>
     .block-container {
@@ -572,7 +572,7 @@ col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 with col_title:
     st.title("Controle de Projetos")
 
-# --- IMPORTAÇÃO DE PLANILHA (AGORA COMPLETA, RESPEITANDO DATAS E TEMPOS) ---
+# --- IMPORTAÇÃO DE PLANILHA (CORRIGIDA DATA/HORA) ---
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
@@ -614,11 +614,11 @@ with col_b1:
                         elemento = obter_valor_coluna(row_dict, ['elemento'])
                         responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
 
-                        # --- TRATAMENTO DE DATAS ---
+                        # --- TRATAMENTO DE DATAS (remove hora automaticamente) ---
                         data_cad_str = obter_valor_coluna(row_dict, ['data', 'data de cadastro', 'data_cadastro'], "")
                         if data_cad_str:
+                            data_cad_str = data_cad_str.strip().split(' ')[0]
                             try:
-                                # Tenta interpretar como datetime e depois formata para o padrão brasileiro
                                 dt_parsed = pd.to_datetime(data_cad_str, dayfirst=True, errors='coerce')
                                 if pd.notna(dt_parsed):
                                     data_cad = dt_parsed.strftime("%d/%m/%Y")
@@ -631,6 +631,7 @@ with col_b1:
 
                         prazo_str = obter_valor_coluna(row_dict, ['prazo', 'prazo de entrega', 'prazo_entrega'], "")
                         if prazo_str:
+                            prazo_str = prazo_str.strip().split(' ')[0]
                             try:
                                 dt_prazo = pd.to_datetime(prazo_str, dayfirst=True, errors='coerce')
                                 if pd.notna(dt_prazo):
@@ -653,7 +654,6 @@ with col_b1:
                             obter_valor_coluna(row_dict, ['tempo_sankhya', 'tempo sankhya', 'tempo_sankhya_sec'], '0')
                         )
 
-                        # Datas de início e fim de cada etapa (se existirem no arquivo)
                         inicio_proj = obter_valor_coluna(row_dict, ['inicio_projeto', 'fim_projeto_inicio'], '')
                         fim_proj = obter_valor_coluna(row_dict, ['fim_projeto', 'fim projeto'], '')
                         inicio_steel = obter_valor_coluna(row_dict, ['inicio_steel', 'fim_steel_inicio'], '')
@@ -746,27 +746,56 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
 ])
 
 # =============================================================================
-# 1. LISTAGEM (com Status Geral corrigido)
+# 1. LISTAGEM (com filtro de data adicionado)
 # =============================================================================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
-    c1, c2, c3 = st.columns(3)
+    # Layout com 6 colunas para incluir os novos filtros de data
+    c1, c2, c3, c4, c5, c6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
     with c1:
-        busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar por projeto, acionamento...", key="pesquisa_rapida_lista")
+        busca_texto = st.text_input("🔎 Pesquisa rápida", placeholder="Buscar...", key="pesquisa_rapida_lista")
     with c2:
-        filtro_status = st.multiselect("Etapa (Status)", options=df_global["status_projeto"].dropna().unique() if not df_global.empty else [])
+        filtro_status = st.multiselect("Etapa", options=df_global["status_projeto"].dropna().unique() if not df_global.empty else [])
     with c3:
-        filtro_situacao = st.multiselect("Situação do Projeto", options=["Em Progresso", "Parados", "Finalizado", "Cancelado"])
+        filtro_situacao = st.multiselect("Situação", options=["Em Progresso", "Parados", "Finalizado", "Cancelado"])
+    with c4:
+        # Seletor do campo de data a filtrar
+        opcoes_data = {
+            "Data Cadastro": "data",
+            "Fim Projeto": "fim_projeto",
+            "Fim Steel": "fim_steel",
+            "Fim Sankhya": "fim_sankhya"
+        }
+        campo_data_nome = st.selectbox("Filtrar por data:", list(opcoes_data.keys()), key="filtro_data_campo")
+    with c5:
+        data_inicio = st.date_input("Início", value=None, key="filtro_data_inicio")
+    with c6:
+        data_fim = st.date_input("Fim", value=None, key="filtro_data_fim")
 
     df_view = df_global.copy()
     if not df_view.empty:
         df_view['situacao_filtro'] = df_view.apply(classificar_situacao, axis=1)
+
     if busca_texto and not df_view.empty:
         df_view = df_view[df_view.astype(str).apply(lambda row: row.str.contains(busca_texto, case=False).any(), axis=1)]
     if filtro_status and not df_view.empty:
         df_view = df_view[df_view["status_projeto"].isin(filtro_status)]
     if filtro_situacao and not df_view.empty:
         df_view = df_view[df_view["situacao_filtro"].isin(filtro_situacao)]
+
+    # Filtro de data
+    if data_inicio is not None or data_fim is not None:
+        coluna_data = opcoes_data[campo_data_nome]
+        # Converte a coluna de data para datetime (formato DD/MM/YYYY, removendo horas se houver)
+        df_view[coluna_data] = df_view[coluna_data].apply(
+            lambda x: pd.to_datetime(str(x).split(' ')[0], format='%d/%m/%Y', errors='coerce')
+            if x and str(x).strip() != '' else pd.NaT
+        )
+        # Aplica filtro de data
+        if data_inicio is not None:
+            df_view = df_view[df_view[coluna_data] >= pd.to_datetime(data_inicio)]
+        if data_fim is not None:
+            df_view = df_view[df_view[coluna_data] <= pd.to_datetime(data_fim)]
 
     if not df_view.empty:
         df_view['ID'] = df_view['id']
