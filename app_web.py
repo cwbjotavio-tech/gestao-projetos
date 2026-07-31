@@ -570,7 +570,7 @@ col_title, col_b1, col_b2 = st.columns([6, 2, 2], vertical_alignment="center")
 with col_title:
     st.title("Controle de Projetos")
 
-# ==================== IMPORTAÇÃO (extração segura de data) ====================
+# ==================== IMPORTAÇÃO (CORRIGIDA INVERSÃO DIA/MÊS) ====================
 with col_b1:
     with st.popover("📥 Importar Planilha", use_container_width=True):
         st.subheader("Carregar Cadastros (.xlsx / .csv)")
@@ -613,17 +613,28 @@ with col_b1:
                         responsavel = obter_valor_coluna(row_dict, ['responsável', 'responsavel'], 'Support')
 
                         def extrair_data(valor_str):
+                            """Extrai uma data de uma string e retorna no formato DD/MM/YYYY."""
                             if not valor_str:
                                 return None
                             match = re.search(r'(\d{2,4}[-/]\d{2,4}[-/]\d{2,4})', valor_str)
                             if match:
-                                data_bruta = match.group(1).replace('/', '-')
-                                try:
-                                    dt = pd.to_datetime(data_bruta, dayfirst=True, errors='coerce')
-                                    if pd.notna(dt):
-                                        return dt.strftime("%d/%m/%Y")
-                                except:
-                                    pass
+                                data_bruta = match.group(1)
+                                # Se contém barra, assume formato brasileiro (dd/mm/aaaa)
+                                if '/' in data_bruta:
+                                    try:
+                                        dt = pd.to_datetime(data_bruta, dayfirst=True, errors='coerce')
+                                        if pd.notna(dt):
+                                            return dt.strftime("%d/%m/%Y")
+                                    except:
+                                        pass
+                                # Se contém hífen, assume ISO (aaaa-mm-dd)
+                                elif '-' in data_bruta:
+                                    try:
+                                        dt = pd.to_datetime(data_bruta, format='%Y-%m-%d', errors='coerce')
+                                        if pd.notna(dt):
+                                            return dt.strftime("%d/%m/%Y")
+                                    except:
+                                        pass
                             return None
 
                         data_cad = extrair_data(obter_valor_coluna(row_dict, ['data', 'data de cadastro', 'data_cadastro'], ""))
@@ -785,7 +796,6 @@ with aba_lista:
             except:
                 return pd.NaT
 
-        # Cria uma Series auxiliar para o filtro, sem modificar df_view[coluna_data]
         serie_data = df_view[coluna_data].apply(converter_data_para_filtro)
         if data_inicio is not None:
             df_view = df_view[serie_data >= pd.to_datetime(data_inicio)]
