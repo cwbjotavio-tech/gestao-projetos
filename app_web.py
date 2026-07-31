@@ -311,7 +311,7 @@ def carregar_dados_db():
 def atualizar_df_global():
     st.session_state.df_global = carregar_dados_db()
 
-# Ações de temporizador
+# Ações de temporizador (mantidas)
 def acao_iniciar_relogio(torre_id, etapa_key):
     now_br = agora_br()
     now_iso = now_br.isoformat()
@@ -735,7 +735,7 @@ aba_lista, aba_kanban, aba_dash, aba_finalizados, aba_cancelados, aba_usuarios =
     "✅ Finalizados", "🚫 Cancelados", "👥 Usuários & Cadastros"
 ])
 
-# ==================== 1. LISTAGEM (com filtro de data) ====================
+# ==================== 1. LISTAGEM (com filtro de data sem corromper a coluna) ====================
 with aba_lista:
     st.subheader("Filtros e Relatório Completo")
     c1, c2, c3, c4, c5, c6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
@@ -769,7 +769,8 @@ with aba_lista:
     if filtro_situacao and not df_view.empty:
         df_view = df_view[df_view["situacao_filtro"].isin(filtro_situacao)]
 
-    if data_inicio is not None or data_fim is not None:
+    # Filtro de data - usando série auxiliar para não alterar a coluna original
+    if (data_inicio is not None or data_fim is not None) and not df_view.empty:
         coluna_data = opcoes_data[campo_data_nome]
         def converter_data_para_filtro(x):
             if not x or str(x).strip() == '':
@@ -784,11 +785,12 @@ with aba_lista:
             except:
                 return pd.NaT
 
-        df_view[coluna_data] = df_view[coluna_data].apply(converter_data_para_filtro)
+        # Cria uma Series auxiliar para o filtro, sem modificar df_view[coluna_data]
+        serie_data = df_view[coluna_data].apply(converter_data_para_filtro)
         if data_inicio is not None:
-            df_view = df_view[df_view[coluna_data] >= pd.to_datetime(data_inicio)]
+            df_view = df_view[serie_data >= pd.to_datetime(data_inicio)]
         if data_fim is not None:
-            df_view = df_view[df_view[coluna_data] <= pd.to_datetime(data_fim)]
+            df_view = df_view[serie_data <= pd.to_datetime(data_fim)]
 
     if not df_view.empty:
         df_view['ID'] = df_view['id']
@@ -1490,7 +1492,6 @@ with aba_usuarios:
         st.warning("Clique abaixo para corrigir SOMENTE as datas que estão com hora (formato ISO). Datas já em DD/MM/YYYY não serão alteradas.")
         if st.button("🔄 Corrigir datas com hora", use_container_width=True):
             with engine.begin() as conn:
-                # Corrige apenas datas que contêm dois-pontos (indicativo de hora)
                 conn.execute(text("""
                     UPDATE torres
                     SET data = TO_CHAR(data::timestamp, 'DD/MM/YYYY')
